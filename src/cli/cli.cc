@@ -3,6 +3,8 @@
 //   tinyhouse solve --out <file>
 //   tinyhouse play --tb <file>
 
+#include "..\solve\solve.h"
+
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -53,8 +55,7 @@ Examples:
             return 2;
         }
         std::cout << "[solve] out=" << out_path << "\n";
-        std::cout << "TODO: solver not implemented. This is the entrypoint.\n";
-        return 0;
+        return solve(out_path);
     }
 
     int run_play(const std::string &tb_path)

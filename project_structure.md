@@ -26,8 +26,6 @@
   cli/
     cli.h
     cli.cc                # parse args; dispatch to run_solve / run_play
-    repl.h
-    repl.cc               # simple text loop for 'play' mode
 
   core/
     types.h               # Color, PieceType, Piece, Square, Outcome, etc.
