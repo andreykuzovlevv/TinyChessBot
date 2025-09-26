@@ -1,7 +1,6 @@
-#include "uci.h"
+#include "cli/cli.h"
 
-int main()
+int main(int argc, char **argv)
 {
-    tiny::repl();
-    return 0;
+    return run_cli(argc, argv);
 }
