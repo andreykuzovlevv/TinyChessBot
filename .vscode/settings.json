@@ -59,6 +59,12 @@
         "optional": "cpp",
         "queue": "cpp",
         "unordered_map": "cpp",
-        "xhash": "cpp"
+        "xhash": "cpp",
+        "*.rh": "cpp",
+        "iomanip": "cpp",
+        "bitset": "cpp",
+        "chrono": "cpp",
+        "forward_list": "cpp",
+        "ratio": "cpp"
     }
 }
