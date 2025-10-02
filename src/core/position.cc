@@ -38,13 +38,13 @@ constexpr std::string_view PieceToChar = " PWFUK   pwfuk  ";
 
 // Returns an ASCII representation of the position
 std::ostream& operator<<(std::ostream& os, const Position& pos) {
-    os << "\n +---+---+---+---+---+---+---+---+\n";
+    os << "\n +---+---+---+---+\n";
 
     for (Rank r = RANK_4; r >= RANK_1; --r) {
         for (File f = FILE_A; f <= FILE_D; ++f)
             os << " | " << PieceToChar[pos.piece_on(make_square(f, r))];
 
-        os << " | " << (1 + r) << "\n +---+---+---+---+---+---+---+---+\n";
+        os << " | " << (1 + r) << "\n +---+---+---+---+\n";
     }
 
     os << "   a   b   c   d\n"
@@ -62,8 +62,8 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
 // http://web.archive.org/web/20201107002606/https://marcelk.net/2013-04-06/paper/upcoming-rep-v2.pdf
 
 // First and second hash functions for indexing the cuckoo tables
-inline int H1(Key h) { return h & 0x1fff; }
-inline int H2(Key h) { return (h >> 16) & 0x1fff; }
+inline int H1(Key h) { return h & 0x7ff; }
+inline int H2(Key h) { return (h >> 16) & 0x7ff; }
 
 // Cuckoo tables with Zobrist hashes of valid reversible moves, and the moves themselves
 std::array<Key, 2048>  cuckoo;
@@ -231,17 +231,42 @@ bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
 
     // King: standard king steps (no occupancy needed)
     if (attacks_bb<KING>(s) & pieces(c, KING)) {
-        std::cout << "bb attacking king pos="
-                  << std::bitset<16>(attacks_bb<KING>(s) & pieces(c, KING)) << "\n";
-        printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_bb<KING>(s) & pieces(c, KING)).c_str());
-        std::cout << "bb atk=" << std::bitset<16>(attacks_bb<KING>(s)) << "\n";
-        printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_bb<KING>(s)).c_str());
+        printf("  sq s:\n%s\n", Bitboards::pretty(square_bb(s)).c_str());
+        printf("  attacking piece:\n%s\n",
+               Bitboards::pretty(attacks_bb<KING>(s) & pieces(c, KING)).c_str());
+        printf("  all attacks on sq s for kings:\n%s\n",
+               Bitboards::pretty(attacks_bb<KING>(s)).c_str());
 
         printf("KING attacks\n");
         return true;
     }
 
     return false;
+}
+
+// Returns a FEN representation of the position. In case of
+// Chess960 the Shredder-FEN notation is used. This is mainly a debugging function.
+string Position::fen() const {
+    int                emptyCnt;
+    std::ostringstream ss;
+
+    for (Rank r = RANK_4; r >= RANK_1; --r) {
+        for (File f = FILE_A; f <= FILE_D; ++f) {
+            for (emptyCnt = 0; f <= FILE_D && empty(make_square(f, r)); ++f) ++emptyCnt;
+
+            if (emptyCnt) ss << emptyCnt;
+
+            if (f <= FILE_D) ss << PieceToChar[piece_on(make_square(f, r))];
+        }
+
+        if (r > RANK_1) ss << '/';
+    }
+
+    ss << (sideToMove == WHITE ? " w " : " b ");
+
+    ss << " " << 1 + (gamePly - (sideToMove == BLACK)) / 2;
+
+    return ss.str();
 }
 
 // Performs some consistency checks for the position object
@@ -259,7 +284,7 @@ bool Position::pos_is_ok() const {
     if (pieceCount[W_KING] != 1 || pieceCount[B_KING] != 1 ||
         attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove)) {
         printf("Sq King in check: %d\n", square<KING>(~sideToMove));
-        printf("  Check on King in check:\n%s\n",
+        printf("  King in check:\n%s\n",
                Bitboards::pretty(square_bb(square<KING>(~sideToMove))).c_str());
 
         assert(0 && "pos_is_ok: Kings");

@@ -31,7 +31,9 @@ int main() {
 
     // Test king attacks from specific squares
     printf("\n=== King Attack Debug ===\n");
+
     Bitboards::init();
+    Position::init();
 
     // Test king attacks from square 0 (A1) and square 12 (A4)
     printf("King attacks from A1 (square 0):\n");
@@ -40,18 +42,16 @@ int main() {
     printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a1).c_str());
 
     printf("King attacks from A4 (square 12):\n");
-    Bitboard attacks_a4 = PseudoAttacks[KING][SQ_A4];
+    Bitboard attacks_a4                 = PseudoAttacks[KING][SQ_A4];
+    Bitboard attacks_a4_with_attacks_bb = attacks_bb<KING>(SQ_A4);
     printf("  Bitboard: %d\n", attacks_a4);
     printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a4).c_str());
-
-    Position::init();
+    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a4_with_attacks_bb).c_str());
 
     Position    pos;
     StateInfo   si;
-    std::string fen = "k3/4/4/K3 w 1";
+    std::string fen = "fuwk/3p/P3/KWUF w 1";
 
     pos.set(fen, &si);
-    std::cout << "hello main\n";
-
-    std::cout << pos;
+    std::cout << pos << std::endl << pos.fen();
 }
