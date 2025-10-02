@@ -206,19 +206,37 @@ Bitboard Position::attackers_to(Square s, Bitboard occupied) const {
 
 bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
     // Pawns: squares from which a pawn of color c would attack s
-    if (attacks_bb<PAWN>(s, ~c) & pieces(c, PAWN)) return true;
+    if (attacks_bb<PAWN>(s, ~c) & pieces(c, PAWN)) {
+        printf("PAWN attacks\n");
+        return true;
+    }
 
     // Horse (xiangqi): leg-blocked; needs occupancy
-    if (attacks_bb<HORSE>(s, occupied) & pieces(c, HORSE)) return true;
+    if (attacks_bb<HORSE>(s, occupied) & pieces(c, HORSE)) {
+        printf("HORSE attacks\n");
+        return true;
+    }
 
     // Ferz: diagonal king-step (no occupancy needed)
-    if (attacks_bb<FERZ>(s) & pieces(c, FERZ)) return true;
+    if (attacks_bb<FERZ>(s) & pieces(c, FERZ)) {
+        printf("FERZ attacks\n");
+        return true;
+    }
 
     // Wazir: orthogonal king-step (no occupancy needed)
-    if (attacks_bb<WAZIR>(s) & pieces(c, WAZIR)) return true;
+    if (attacks_bb<WAZIR>(s) & pieces(c, WAZIR)) {
+        printf("WAZIR attacks\n");
+        return true;
+    }
 
     // King: standard king steps (no occupancy needed)
-    if (attacks_bb<KING>(s) & pieces(c, KING)) return true;
+    if (attacks_bb<KING>(s) & pieces(c, KING)) {
+        std::cout << "bb king pos=" << std::bitset<16>(pieces(c, KING)) << "\n";
+        std::cout << "bb atk=" << std::bitset<16>(attacks_bb<KING>(s)) << "\n";
+
+        printf("KING attacks\n");
+        return true;
+    }
 
     return false;
 }
@@ -236,8 +254,10 @@ bool Position::pos_is_ok() const {
     if (Fast) return true;
 
     if (pieceCount[W_KING] != 1 || pieceCount[B_KING] != 1 ||
-        attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove))
+        attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove)) {
+        printf("Sq King in check: %d\n", square<KING>(~sideToMove));
         assert(0 && "pos_is_ok: Kings");
+    }
 
     if (pieceCount[W_PAWN] > 2 || pieceCount[B_PAWN] > 2) assert(0 && "pos_is_ok: Pawns");
 

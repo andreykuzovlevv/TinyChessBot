@@ -109,6 +109,7 @@ inline int distance<Square>(Square x, Square y) {
 template <PieceType Pt>
 inline Bitboard attacks_bb(Square s, Color c = COLOR_NB) {
     assert((Pt != PAWN || c < COLOR_NB) && (is_ok(s)));
+    printf("checking pseudo attacks at square %d\n", s);
     return Pt == PAWN ? PseudoAttacks[c][s] : PseudoAttacks[Pt][s];
 }
 
@@ -132,8 +133,10 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
             return attacks;
         }
 
-        default:
+        default: {
+            printf("checking pseudo attacks for piece %d at square %d\n", Pt, s);
             return PseudoAttacks[Pt][s];
+        }
     }
 }
 

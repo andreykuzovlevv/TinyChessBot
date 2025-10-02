@@ -162,8 +162,6 @@ inline int Position::count() const {
 template <PieceType Pt>
 inline Square Position::square(Color c) const {
     assert(count<Pt>(c) == 1 && "square(), not exactly one piece of this type");
-    printf("%d count\n", count<Pt>(c));
-    std::cout << "lsb from squere function\n" << std::bitset<16>(pieces(c, Pt)) << "\n";
     return lsb(pieces(c, Pt));
 }
 
