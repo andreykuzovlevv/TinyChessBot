@@ -12,8 +12,11 @@ Bitboard PseudoAttacks[PIECE_TYPE_NB][SQUARE_NB];
 Bitboard HorseAttacks[DIR_NB][SQUARE_NB];
 Square   HorseLegSquare[DIR_NB][SQUARE_NB];
 
-constexpr std::pair<DirectionIndex, Direction> LEG_DIRS[DIR_NB] = {
-    {DIR_N, NORTH}, {DIR_E, EAST}, {DIR_S, SOUTH}, {DIR_W, WEST}};
+struct LegDir {
+    DirectionIndex idx;
+    Direction      delta;
+};
+constexpr LegDir LEG_DIRS[DIR_NB] = {{DIR_N, NORTH}, {DIR_E, EAST}, {DIR_S, SOUTH}, {DIR_W, WEST}};
 
 namespace {
 
@@ -22,6 +25,18 @@ namespace {
 Bitboard safe_destination(Square s, int step) {
     Square to = Square(s + step);
     return is_ok(to) && distance(s, to) <= 2 ? square_bb(to) : Bitboard(0);
+}
+
+// Check if a diagonal direction is compatible with a leg direction for horse moves
+bool is_compatible_direction(Direction legDir, Direction diagDir) {
+    // For each leg direction, only certain diagonal directions are valid
+    switch (legDir) {
+        case NORTH:  return diagDir == NORTH_EAST || diagDir == NORTH_WEST;
+        case EAST:   return diagDir == NORTH_EAST || diagDir == SOUTH_EAST;
+        case SOUTH:  return diagDir == SOUTH_EAST || diagDir == SOUTH_WEST;
+        case WEST:   return diagDir == NORTH_WEST || diagDir == SOUTH_WEST;
+        default:     return false;
+    }
 }
 }  // namespace
 
@@ -66,24 +81,24 @@ void Bitboards::init() {
         for (int step : {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST})
             PseudoAttacks[FERZ][s1] |= safe_destination(s1, step);
 
-        // Fill Horse Leg Squares per each direction
-        for (auto [dir, delta] : LEG_DIRS) {
-            Square leg = Square(int(s1) + delta);
-            if (is_ok(leg)) HorseLegSquare[dir][s1] = leg;
+        // Fill Horse Leg Squares and Attacks per each direction
+        for (const auto& item : LEG_DIRS) {
+            Square leg = Square(int(s1) + item.delta);
+            if (is_ok(leg)) {
+                HorseLegSquare[item.idx][s1] = leg;
+                
+                // Generate horse attacks for this direction
+                // Horse moves: one step in leg direction, then one step diagonally
+                Direction legDir = item.delta;
+                for (Direction diagDir : {NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST}) {
+                    // Check if the diagonal direction is compatible with leg direction
+                    if (is_compatible_direction(legDir, diagDir)) {
+                        int step = legDir + diagDir;
+                        HorseAttacks[item.idx][s1] |= safe_destination(s1, step);
+                    }
+                }
+            }
         }
-
-        // Fill Horse Attacks per each direction
-        for (int step : {s1 + NORTH + NORTH_EAST, s1 + NORTH + NORTH_WEST})
-            HorseAttacks[DIR_N][s1] |= safe_destination(s1, step);
-
-        for (int step : {s1 + EAST + SOUTH_EAST, s1 + EAST + NORTH_EAST})
-            HorseAttacks[DIR_E][s1] |= safe_destination(s1, step);
-
-        for (int step : {s1 + SOUTH + SOUTH_EAST, s1 + SOUTH + SOUTH_WEST})
-            HorseAttacks[DIR_S][s1] |= safe_destination(s1, step);
-
-        for (int step : {s1 + WEST + SOUTH_WEST, s1 + WEST + NORTH_WEST})
-            HorseAttacks[DIR_W][s1] |= safe_destination(s1, step);
     }
 }
 

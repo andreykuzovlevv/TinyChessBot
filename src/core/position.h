@@ -19,13 +19,16 @@
 #ifndef POSITION_H_INCLUDED
 #define POSITION_H_INCLUDED
 
+#include <bitset>
 #include <cassert>
 #include <deque>
 #include <iosfwd>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "bitboard.h"
 #include "types.h"
 
 namespace tiny {
@@ -65,11 +68,15 @@ class Position {
     template <typename... PieceTypes>
     Bitboard pieces(Color c, PieceTypes... pts) const;
 
-    inline Piece Position::piece_on(Square s) const {
+    inline Piece piece_on(Square s) const {
         assert(is_ok(s));
         return board[s];
     }
     inline bool empty(Square s) const { return board[s] == NO_PIECE; }
+    template <PieceType Pt>
+    int count(Color c) const;
+    template <PieceType Pt>
+    int count() const;
     template <PieceType Pt>
     Square square(Color c) const;
 
@@ -92,7 +99,7 @@ class Position {
 
     // Other properties of the position
     inline Color side_to_move() const { return sideToMove; }
-    inline int   Position::game_ply() const { return gamePly; }
+    inline int   game_ply() const { return gamePly; }
     bool         is_draw(int ply) const;
     bool         is_repetition(int ply) const;
     bool         upcoming_repetition(int ply) const;
@@ -124,6 +131,8 @@ class Position {
     int        gamePly;
 };
 
+std::ostream& operator<<(std::ostream& os, const Position& pos);
+
 inline Key Position::key() const { return st->key; }
 
 inline Bitboard Position::pieces() const { return byTypeBB[ALL_PIECES]; }
@@ -141,8 +150,20 @@ inline Bitboard Position::pieces(Color c, PieceTypes... pts) const {
 }
 
 template <PieceType Pt>
+inline int Position::count(Color c) const {
+    return pieceCount[make_piece(c, Pt)];
+}
+
+template <PieceType Pt>
+inline int Position::count() const {
+    return count<Pt>(WHITE) + count<Pt>(BLACK);
+}
+
+template <PieceType Pt>
 inline Square Position::square(Color c) const {
-    assert(count<Pt>(c) == 1);
+    assert(count<Pt>(c) == 1 && "square(), not exactly one piece of this type");
+    printf("%d count\n", count<Pt>(c));
+    std::cout << "lsb from squere function\n" << std::bitset<16>(pieces(c, Pt)) << "\n";
     return lsb(pieces(c, Pt));
 }
 

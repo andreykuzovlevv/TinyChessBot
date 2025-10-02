@@ -9,9 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iosfwd>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #define stringify2(x) #x

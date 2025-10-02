@@ -1,6 +1,10 @@
 
 #include <stdio.h>
 
+#include <iostream>
+#include <string>
+
+#include "core/position.h"
 #include "core/types.h"
 
 using namespace tiny;
@@ -17,4 +21,16 @@ int main() {
         PieceType pt = type_of(pc);
         printf("Piece %d: color %d, type %d\n", pc, c, pt);
     }
+
+    Bitboards::init();
+    Position::init();
+
+    Position    pos;
+    StateInfo   si;
+    std::string fen = "k3/4/4/K3 w 1";
+
+    pos.set(fen, &si);
+    std::cout << "hello main\n";
+
+    std::cout << pos;
 }

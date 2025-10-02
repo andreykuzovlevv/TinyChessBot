@@ -44,6 +44,37 @@ constexpr Bitboard square_bb(Square s) {
     return (1u << s);
 }
 
+// Overloads of bitwise operators between a Bitboard and a Square for testing
+// whether a given bit is set in a bitboard, and for setting and clearing bits.
+
+constexpr Bitboard  operator&(Bitboard b, Square s) { return b & square_bb(s); }
+constexpr Bitboard  operator|(Bitboard b, Square s) { return b | square_bb(s); }
+constexpr Bitboard  operator^(Bitboard b, Square s) { return b ^ square_bb(s); }
+constexpr Bitboard& operator|=(Bitboard& b, Square s) { return b |= square_bb(s); }
+constexpr Bitboard& operator^=(Bitboard& b, Square s) { return b ^= square_bb(s); }
+
+constexpr Bitboard operator&(Square s, Bitboard b) { return b & s; }
+constexpr Bitboard operator|(Square s, Bitboard b) { return b | s; }
+constexpr Bitboard operator^(Square s, Bitboard b) { return b ^ s; }
+
+constexpr Bitboard operator|(Square s1, Square s2) { return square_bb(s1) | s2; }
+
+// Moves a bitboard one or two steps as specified by the direction D
+template <Direction D>
+constexpr Bitboard shift(Bitboard b) {
+    return D == NORTH           ? b << 4
+           : D == SOUTH         ? b >> 4
+           : D == NORTH + NORTH ? b << 8
+           : D == SOUTH + SOUTH ? b >> 8
+           : D == EAST          ? (b & ~FileDBB) << 1
+           : D == WEST          ? (b & ~FileABB) >> 1
+           : D == NORTH_EAST    ? (b & ~FileDBB) << 5
+           : D == NORTH_WEST    ? (b & ~FileABB) << 3
+           : D == SOUTH_EAST    ? (b & ~FileDBB) >> 3
+           : D == SOUTH_WEST    ? (b & ~FileABB) >> 5
+                                : 0;
+}
+
 // Returns the squares attacked by pawns of the given color
 // from the squares in the given bitboard.
 template <Color C>
@@ -89,15 +120,17 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
     assert((Pt != PAWN) && (is_ok(s)));
 
     switch (Pt) {
-        case HORSE:
+        case HORSE: {
             Bitboard attacks = 0;
-            if (!(occupied & square_bb(HorseLegSquare[NORTH][s])))
-                attacks |= HorseAttacks[NORTH][s];
-            if (!(occupied & square_bb(HorseLegSquare[DIR_E][s]))) attacks |= HorseAttacks[EAST][s];
-            if (!(occupied & square_bb(HorseLegSquare[DIR_S][s])))
-                attacks |= HorseAttacks[SOUTH][s];
-            if (!(occupied & square_bb(HorseLegSquare[DIR_W][s]))) attacks |= HorseAttacks[WEST][s];
+            // Check each direction only if the leg square is valid
+            for (int dir = DIR_N; dir < DIR_NB; ++dir) {
+                Square leg = HorseLegSquare[dir][s];
+                if (is_ok(leg) && !(occupied & square_bb(leg))) {
+                    attacks |= HorseAttacks[dir][s];
+                }
+            }
             return attacks;
+        }
 
         default:
             return PseudoAttacks[Pt][s];
@@ -137,7 +170,7 @@ inline int popcount(Bitboard b) {
 
 // Returns the least significant bit in a non-zero bitboard.
 inline Square lsb(Bitboard b) {
-    assert(b);
+    assert(b && "lsb() on empty bitboard");
 
 #if defined(__GNUC__)  // GCC, Clang, ICX
 

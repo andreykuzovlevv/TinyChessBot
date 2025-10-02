@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cassert>
 #include <cctype>
 #include <cstddef>
@@ -15,7 +16,6 @@
 
 #include "bitboard.h"
 #include "misc.h"
-#include "uci.h"
 
 using std::string;
 
@@ -27,13 +27,14 @@ Key psq[PIECE_NB][SQUARE_NB];
 Key side;
 }  // namespace Zobrist
 
-constexpr std::string_view PieceToChar(" PNBRQK  pnbrqk");
+namespace {
 
 static constexpr Piece Pieces[] = {W_PAWN, W_HORSE, W_FERZ, W_WAZIR, W_KING,
                                    B_PAWN, B_HORSE, B_FERZ, B_WAZIR, B_KING};
 
 // Piece to character mapping for FEN output
 constexpr std::string_view PieceToChar = " PWFUK   pwfuk  ";
+}  // namespace
 
 // Returns an ASCII representation of the position
 std::ostream& operator<<(std::ostream& os, const Position& pos) {
@@ -50,7 +51,7 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
        << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
        << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: ";
 
-    for (Bitboard b = pos.checkers(); b;) os << UCIEngine::square(pop_lsb(b)) << " ";
+    // for (Bitboard b = pos.checkers(); b;) os << UCIEngine::square(pop_lsb(b)) << " ";
 
     return os;
 }
@@ -83,7 +84,7 @@ void Position::init() {
     // Prepare the cuckoo tables
     cuckoo.fill(0);
     cuckooMove.fill(Move::none());
-    [[maybe_unused]] int count = 0;
+    int count = 0;
     for (Piece pc : Pieces)
         for (Square s1 = SQ_A1; s1 <= SQ_D4; ++s1)
             for (Square s2 = Square(s1 + 1); s2 <= SQ_D4; ++s2)
@@ -100,6 +101,7 @@ void Position::init() {
                     }
                     count++;
                 }
+    std::cout << count << " reversible moves in cuckoo hash\n";
 }
 
 // Initializes the position object with the given FEN string.
@@ -156,6 +158,7 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
             ++sq;
         }
     }
+    std::cout << "bb=" << std::bitset<16>(pieces()) << "\n";
 
     // 2. Active color
     ss >> token;
@@ -168,10 +171,10 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
     // Convert from fullmove starting from 1 to gamePly starting from 0,
     // handle also common incorrect FEN with fullmove = 0.
     gamePly = std::max(2 * (gamePly - 1), 0) + (sideToMove == BLACK);
-
     set_state();
 
     assert(pos_is_ok());
+    std::cout << "hello set func 4\n";
 
     return *this;
 }
@@ -180,8 +183,7 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
 // data that once computed is updated incrementally as moves are made.
 // The function is only used when a new position is set up
 void Position::set_state() const {
-    st->key = 0;
-
+    st->key        = 0;
     st->checkersBB = attackers_to(square<KING>(sideToMove)) & pieces(~sideToMove);
 
     for (Bitboard b = pieces(); b;) {
@@ -251,7 +253,6 @@ bool Position::pos_is_ok() const {
         if (pieceCount[pc] != popcount(pieces(color_of(pc), type_of(pc))) ||
             pieceCount[pc] != std::count(board, board + SQUARE_NB, pc))
             assert(0 && "pos_is_ok: Pieces");
-
     return true;
 }
 
