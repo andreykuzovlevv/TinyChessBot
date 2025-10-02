@@ -31,11 +31,16 @@ Bitboard safe_destination(Square s, int step) {
 bool is_compatible_direction(Direction legDir, Direction diagDir) {
     // For each leg direction, only certain diagonal directions are valid
     switch (legDir) {
-        case NORTH:  return diagDir == NORTH_EAST || diagDir == NORTH_WEST;
-        case EAST:   return diagDir == NORTH_EAST || diagDir == SOUTH_EAST;
-        case SOUTH:  return diagDir == SOUTH_EAST || diagDir == SOUTH_WEST;
-        case WEST:   return diagDir == NORTH_WEST || diagDir == SOUTH_WEST;
-        default:     return false;
+        case NORTH:
+            return diagDir == NORTH_EAST || diagDir == NORTH_WEST;
+        case EAST:
+            return diagDir == NORTH_EAST || diagDir == SOUTH_EAST;
+        case SOUTH:
+            return diagDir == SOUTH_EAST || diagDir == SOUTH_WEST;
+        case WEST:
+            return diagDir == NORTH_WEST || diagDir == SOUTH_WEST;
+        default:
+            return false;
     }
 }
 }  // namespace
@@ -43,12 +48,12 @@ bool is_compatible_direction(Direction legDir, Direction diagDir) {
 // Returns an ASCII representation of a bitboard suitable
 // to be printed to standard output. Useful for debugging.
 std::string Bitboards::pretty(Bitboard b) {
-    std::string s = "+---+---+---+---+---+---+---+---+\n";
+    std::string s = "+---+---+---+---+\n";
 
     for (Rank r = RANK_4; r >= RANK_1; --r) {
         for (File f = FILE_A; f <= FILE_D; ++f) s += b & make_square(f, r) ? "| X " : "|   ";
 
-        s += "| " + std::to_string(1 + r) + "\n+---+---+---+---+---+---+---+---+\n";
+        s += "| " + std::to_string(1 + r) + "\n+---+---+---+---+\n";
     }
     s += "  a   b   c   d\n";
 
@@ -86,7 +91,7 @@ void Bitboards::init() {
             Square leg = Square(int(s1) + item.delta);
             if (is_ok(leg)) {
                 HorseLegSquare[item.idx][s1] = leg;
-                
+
                 // Generate horse attacks for this direction
                 // Horse moves: one step in leg direction, then one step diagonally
                 Direction legDir = item.delta;

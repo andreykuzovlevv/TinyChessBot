@@ -22,7 +22,28 @@ int main() {
         printf("Piece %d: color %d, type %d\n", pc, c, pt);
     }
 
+    // Debug square layout and file/rank functions
+    printf("\n=== Square Layout Debug ===\n");
+    for (Square s = SQ_A1; s <= SQ_D4; ++s) {
+        printf("Square %d (%c%c): file=%d, rank=%d\n", s, 'a' + file_of(s), '1' + rank_of(s),
+               file_of(s), rank_of(s));
+    }
+
+    // Test king attacks from specific squares
+    printf("\n=== King Attack Debug ===\n");
     Bitboards::init();
+
+    // Test king attacks from square 0 (A1) and square 12 (A4)
+    printf("King attacks from A1 (square 0):\n");
+    Bitboard attacks_a1 = PseudoAttacks[KING][SQ_A1];
+    printf("  Bitboard: %d\n", attacks_a1);
+    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a1).c_str());
+
+    printf("King attacks from A4 (square 12):\n");
+    Bitboard attacks_a4 = PseudoAttacks[KING][SQ_A4];
+    printf("  Bitboard: %d\n", attacks_a4);
+    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a4).c_str());
+
     Position::init();
 
     Position    pos;

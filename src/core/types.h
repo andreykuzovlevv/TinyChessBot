@@ -162,7 +162,7 @@ constexpr Square& operator-=(Square& s, Direction d) { return s = s - d; }
 // Toggle color
 constexpr Color operator~(Color c) { return Color(c ^ BLACK); }
 
-constexpr Square make_square(File f, Rank r) { return Square((r << 3) + f); }
+constexpr Square make_square(File f, Rank r) { return Square((r << 2) + f); }
 
 constexpr bool is_ok(Square s) { return s >= SQ_A1 && s <= SQ_D4; }
 
@@ -177,9 +177,9 @@ constexpr Color color_of(Piece pc) {
     return Color(pc >> 3);
 }
 
-constexpr File file_of(Square s) { return File(s & 7); }
+constexpr File file_of(Square s) { return File(s & 3); }
 
-constexpr Rank rank_of(Square s) { return Rank(s >> 3); }
+constexpr Rank rank_of(Square s) { return Rank(s >> 2); }
 
 struct Pockets {
     uint8_t p[COLOR_NB][PIECE_TYPE_NB];  // Only {PAWN,WAZIR,HORSE,FERZ} used; KING always 0

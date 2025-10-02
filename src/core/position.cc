@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     }
 
     os << "   a   b   c   d\n"
-       << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
+       // << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
        << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: ";
 
     // for (Bitboard b = pos.checkers(); b;) os << UCIEngine::square(pop_lsb(b)) << " ";
@@ -231,8 +231,11 @@ bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
 
     // King: standard king steps (no occupancy needed)
     if (attacks_bb<KING>(s) & pieces(c, KING)) {
-        std::cout << "bb king pos=" << std::bitset<16>(pieces(c, KING)) << "\n";
+        std::cout << "bb attacking king pos="
+                  << std::bitset<16>(attacks_bb<KING>(s) & pieces(c, KING)) << "\n";
+        printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_bb<KING>(s) & pieces(c, KING)).c_str());
         std::cout << "bb atk=" << std::bitset<16>(attacks_bb<KING>(s)) << "\n";
+        printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_bb<KING>(s)).c_str());
 
         printf("KING attacks\n");
         return true;
@@ -256,6 +259,9 @@ bool Position::pos_is_ok() const {
     if (pieceCount[W_KING] != 1 || pieceCount[B_KING] != 1 ||
         attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove)) {
         printf("Sq King in check: %d\n", square<KING>(~sideToMove));
+        printf("  Check on King in check:\n%s\n",
+               Bitboards::pretty(square_bb(square<KING>(~sideToMove))).c_str());
+
         assert(0 && "pos_is_ok: Kings");
     }
 
