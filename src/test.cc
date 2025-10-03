@@ -36,22 +36,16 @@ int main() {
     Position::init();
 
     // Test king attacks from square 0 (A1) and square 12 (A4)
-    printf("King attacks from A1 (square 0):\n");
     Bitboard attacks_a1 = PseudoAttacks[KING][SQ_A1];
-    printf("  Bitboard: %d\n", attacks_a1);
-    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a1).c_str());
+    printf("King attacks from A1 (square 0):\n%s\n", Bitboards::pretty(attacks_a1).c_str());
 
-    printf("King attacks from A4 (square 12):\n");
-    Bitboard attacks_a4                 = PseudoAttacks[KING][SQ_A4];
-    Bitboard attacks_a4_with_attacks_bb = attacks_bb<KING>(SQ_A4);
-    printf("  Bitboard: %d\n", attacks_a4);
-    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a4).c_str());
-    printf("  Pretty:\n%s\n", Bitboards::pretty(attacks_a4_with_attacks_bb).c_str());
+    Bitboard attacks_a4 = PseudoAttacks[KING][SQ_A4];
+    printf("King attacks from A4 (square 12):\n%s\n", Bitboards::pretty(attacks_a4).c_str());
 
     Position    pos;
     StateInfo   si;
     std::string fen = "fuwk/3p/P3/KWUF w 1";
 
     pos.set(fen, &si);
-    std::cout << pos << std::endl << pos.fen();
+    std::cout << pos;
 }

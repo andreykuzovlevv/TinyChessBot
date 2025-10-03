@@ -181,6 +181,10 @@ constexpr File file_of(Square s) { return File(s & 3); }
 
 constexpr Rank rank_of(Square s) { return Rank(s >> 2); }
 
+constexpr Rank relative_rank(Color c, Rank r) { return Rank(r ^ (c * 7)); }
+
+constexpr Rank relative_rank(Color c, Square s) { return relative_rank(c, rank_of(s)); }
+
 struct Pockets {
     uint8_t p[COLOR_NB][PIECE_TYPE_NB];  // Only {PAWN,WAZIR,HORSE,FERZ} used; KING always 0
 };
@@ -203,7 +207,7 @@ constexpr Key make_key(uint64_t seed) {
 //
 // AUX meaning:
 //   PROMOTION: 0=WAZIR, 1=FERZ, 2=HORSE
-//   DROP     : 0=PAWN,  1=WAZIR, 2=FERZ, 3=HORSE
+//   DROP     : 0=PAWN, 1=HORSE, 2=FERZ, 3=WAZIR
 //
 // No en passant, no castling in this variant.
 

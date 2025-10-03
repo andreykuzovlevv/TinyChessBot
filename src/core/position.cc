@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     }
 
     os << "   a   b   c   d\n"
-       // << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
+       << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
        << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: ";
 
     // for (Bitboard b = pos.checkers(); b;) os << UCIEngine::square(pop_lsb(b)) << " ";
@@ -158,7 +158,6 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
             ++sq;
         }
     }
-    std::cout << "bb=" << std::bitset<16>(pieces()) << "\n";
 
     // 2. Active color
     ss >> token;
@@ -174,7 +173,6 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
     set_state();
 
     assert(pos_is_ok());
-    std::cout << "hello set func 4\n";
 
     return *this;
 }
@@ -267,6 +265,136 @@ string Position::fen() const {
     ss << " " << 1 + (gamePly - (sideToMove == BLACK)) / 2;
 
     return ss.str();
+}
+
+// Makes a move, and saves all information necessary
+// to a StateInfo object. The move is assumed to be legal. Pseudo-legal
+// moves should be filtered out before this function is called.
+// If a pointer to the TT table is passed, the entry for the new position
+// will be prefetched
+void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
+    assert(m.is_ok());
+    assert(&newSt != st);
+
+    Key k = st->key ^ Zobrist::side;
+
+    // Copy some fields of the old state to our new StateInfo object except the
+    // ones which are going to be recalculated from scratch anyway and then switch
+    // our state pointer to point to the new (ready to be updated) state.
+    std::memcpy(&newSt, st, offsetof(StateInfo, key));
+    newSt.previous = st;
+    st             = &newSt;
+
+    // Increment ply counters. In particular, rule50 will be reset to zero later on
+    // in case of a capture or a pawn move.
+    ++gamePly;
+
+    Color  us       = sideToMove;
+    Color  them     = ~us;
+    Square from     = m.from_sq();
+    Square to       = m.to_sq();
+    Piece  pc       = piece_on(from);
+    Piece  captured = piece_on(to);
+
+    assert(color_of(pc) == us);
+    assert(captured == NO_PIECE || color_of(captured) == them);
+    assert(type_of(captured) != KING);
+
+    if (captured) {
+        Square capsq = to;
+
+        // Update board and piece lists
+        remove_piece(capsq);
+        k ^= Zobrist::psq[captured][capsq];
+
+    } else
+        // Update hash key
+        k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
+
+    // If the moving piece is a pawn do some special extra work
+    if (type_of(pc) == PAWN) {
+        if (m.type_of() == PROMOTION) {
+            Piece     promotion     = make_piece(us, m.promotion_type());
+            PieceType promotionType = type_of(promotion);
+
+            assert(relative_rank(us, to) == RANK_4);
+            assert(type_of(promotion) >= HORSE && type_of(promotion) <= WAZIR);
+
+            remove_piece(to);
+            put_piece(promotion, to);
+
+            // Update hash keys
+            // Zobrist::psq[pc][to] is zero, so we don't need to clear it
+            k ^= Zobrist::psq[promotion][to];
+        }
+    }
+
+    // Set capture piece
+    st->capturedPiece = captured;
+
+    // Calculate checkers bitboard (if move gives check)
+    st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
+
+    sideToMove = ~sideToMove;
+
+    // Update the key with the final value
+    st->key = k;
+
+    // Calculate the repetition info. It is the ply distance from the previous
+    // occurrence of the same position, negative in the 3-fold case, or zero
+    // if the position was not repeated.
+    st->repetition = 0;
+
+    StateInfo* stp = st->previous->previous;
+    for (int i = 4; i <= gamePly; i += 2) {
+        stp = stp->previous->previous;
+        if (stp->key == st->key) {
+            st->repetition = stp->repetition ? -i : i;
+            break;
+        }
+    }
+
+    assert(pos_is_ok());
+    assert(from != SQ_NONE);
+}
+
+// Unmakes a move. When it returns, the position should
+// be restored to exactly the same state as before the move was made.
+void Position::undo_move(Move m) {
+    assert(m.is_ok());
+
+    sideToMove = ~sideToMove;
+
+    Color  us   = sideToMove;
+    Square from = m.from_sq();
+    Square to   = m.to_sq();
+    Piece  pc   = piece_on(to);
+
+    assert(type_of(st->capturedPiece) != KING);
+
+    if (m.type_of() == PROMOTION) {
+        assert(relative_rank(us, to) == RANK_4);
+        assert(type_of(pc) == m.promotion_type());
+        assert(type_of(pc) >= HORSE && type_of(pc) <= WAZIR);
+
+        remove_piece(to);
+        pc = make_piece(us, PAWN);
+        put_piece(pc, to);
+    }
+
+    move_piece(to, from);  // Put the piece back at the source square
+
+    if (st->capturedPiece) {
+        Square capsq = to;
+
+        put_piece(st->capturedPiece, capsq);  // Restore the captured piece
+    }
+
+    // Finally point our state pointer back to the previous state
+    st = st->previous;
+    --gamePly;
+
+    assert(pos_is_ok());
 }
 
 // Performs some consistency checks for the position object

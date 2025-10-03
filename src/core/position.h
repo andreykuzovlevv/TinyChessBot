@@ -41,8 +41,11 @@ struct StateInfo {
     // Copied when making a move
 
     // Not copied when making a move (will be recomputed anyhow)
-    Key      key;
-    Bitboard checkersBB;
+    Key        key;
+    Bitboard   checkersBB;
+    StateInfo* previous;
+    Piece      capturedPiece;
+    int        repetition;
 };
 
 // A list to keep track of the position states along the setup moves (from the
@@ -91,7 +94,7 @@ class Position {
     // Properties of moves
 
     // Doing and undoing moves
-    void do_move(Move m, StateInfo& newSt);
+    void do_move(Move m, StateInfo& newSt, bool givesCheck);
     void undo_move(Move m);
 
     // Accessing hash keys
@@ -115,7 +118,6 @@ class Position {
    private:
     // Initialization helpers (used while setting up a position)
     void set_state() const;
-    void set_check_info() const;
 
     // Other helpers
     void move_piece(Square from, Square to);
