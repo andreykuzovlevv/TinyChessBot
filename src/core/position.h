@@ -44,6 +44,7 @@ struct StateInfo {
     Key        key;
     Bitboard   checkersBB;
     StateInfo* previous;
+    Bitboard   blockersForKing[COLOR_NB];
     Piece      capturedPiece;
     int        repetition;
 };
@@ -85,13 +86,17 @@ class Position {
 
     // Checking
     Bitboard checkers() const;
+    Bitboard blockers_for_king(Color c) const;
 
     // Attacks to/from a given square
     Bitboard attackers_to(Square s) const;
     Bitboard attackers_to(Square s, Bitboard occupied) const;
     bool     attackers_to_exist(Square s, Bitboard occupied, Color c) const;
+    void     update_slider_blockers(Color c) const;
 
     // Properties of moves
+    bool  legal(Move m) const;
+    Piece moved_piece(Move m) const;
 
     // Doing and undoing moves
     void do_move(Move m, StateInfo& newSt, bool givesCheck);
@@ -118,6 +123,7 @@ class Position {
    private:
     // Initialization helpers (used while setting up a position)
     void set_state() const;
+    void set_check_info() const;
 
     // Other helpers
     void move_piece(Square from, Square to);
@@ -136,6 +142,8 @@ class Position {
 std::ostream& operator<<(std::ostream& os, const Position& pos);
 
 inline Key Position::key() const { return st->key; }
+
+inline Piece Position::moved_piece(Move m) const { return piece_on(m.from_sq()); }
 
 inline Bitboard Position::pieces() const { return byTypeBB[ALL_PIECES]; }
 
@@ -168,6 +176,10 @@ inline Square Position::square(Color c) const {
 }
 
 inline Bitboard Position::attackers_to(Square s) const { return attackers_to(s, pieces()); }
+
+inline Bitboard Position::checkers() const { return st->checkersBB; }
+
+inline Bitboard Position::blockers_for_king(Color c) const { return st->blockersForKing[c]; }
 
 inline void Position::put_piece(Piece pc, Square s) {
     board[s] = pc;

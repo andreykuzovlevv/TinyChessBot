@@ -83,6 +83,19 @@ constexpr Bitboard pawn_attacks_bb(Bitboard b) {
                       : shift<SOUTH_WEST>(b) | shift<SOUTH_EAST>(b);
 }
 
+inline Bitboard horse_leg_bb(Square from, Square to) {
+    assert(is_ok(from) && is_ok(to));
+
+    // Find which leg direction produces 'to' from 'from'
+    for (int d = DIR_N; d < DIR_NB; ++d) {
+        Square leg = HorseLegSquare[d][from];
+        if (!is_ok(leg)) continue;
+
+        if (HorseAttacks[d][from] & square_bb(to)) return square_bb(leg);
+    }
+    return Bitboard(0);  // Defensive: shouldn't be reached if tables are consistent
+}
+
 // distance() functions return the distance between x and y, defined as the
 // number of steps for a king in x to reach y.
 
@@ -133,7 +146,6 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
         }
 
         default: {
-            printf("checking pseudo attacks for piece %d at square %d\n", Pt, s);
             return PseudoAttacks[Pt][s];
         }
     }

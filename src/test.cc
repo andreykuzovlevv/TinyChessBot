@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 
+#include "core/movegen.h"
 #include "core/position.h"
 #include "core/types.h"
 
@@ -47,5 +48,8 @@ int main() {
     std::string fen = "fuwk/3p/P3/KWUF w 1";
 
     pos.set(fen, &si);
+
+    printf("%d\n", MoveList<LEGAL>(pos).size());
+
     std::cout << pos;
 }

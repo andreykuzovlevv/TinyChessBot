@@ -177,12 +177,45 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
     return *this;
 }
 
+// Returns a FEN representation of the position. In case of
+// Chess960 the Shredder-FEN notation is used. This is mainly a debugging function.
+string Position::fen() const {
+    int                emptyCnt;
+    std::ostringstream ss;
+
+    for (Rank r = RANK_4; r >= RANK_1; --r) {
+        for (File f = FILE_A; f <= FILE_D; ++f) {
+            for (emptyCnt = 0; f <= FILE_D && empty(make_square(f, r)); ++f) ++emptyCnt;
+
+            if (emptyCnt) ss << emptyCnt;
+
+            if (f <= FILE_D) ss << PieceToChar[piece_on(make_square(f, r))];
+        }
+
+        if (r > RANK_1) ss << '/';
+    }
+
+    ss << (sideToMove == WHITE ? " w " : " b ");
+
+    ss << " " << 1 + (gamePly - (sideToMove == BLACK)) / 2;
+
+    return ss.str();
+}
+
+// Sets king attacks to detect if a move gives check
+void Position::set_check_info() const {
+    update_slider_blockers(WHITE);
+    update_slider_blockers(BLACK);
+}
+
 // Computes the hash keys of the position, and other
 // data that once computed is updated incrementally as moves are made.
 // The function is only used when a new position is set up
 void Position::set_state() const {
     st->key        = 0;
     st->checkersBB = attackers_to(square<KING>(sideToMove)) & pieces(~sideToMove);
+
+    set_check_info();
 
     for (Bitboard b = pieces(); b;) {
         Square s  = pop_lsb(b);
@@ -242,29 +275,49 @@ bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
     return false;
 }
 
-// Returns a FEN representation of the position. In case of
-// Chess960 the Shredder-FEN notation is used. This is mainly a debugging function.
-string Position::fen() const {
-    int                emptyCnt;
-    std::ostringstream ss;
+// Tests whether a pseudo-legal move is legal
+bool Position::legal(Move m) const {
+    assert(m.is_ok());
 
-    for (Rank r = RANK_4; r >= RANK_1; --r) {
-        for (File f = FILE_A; f <= FILE_D; ++f) {
-            for (emptyCnt = 0; f <= FILE_D && empty(make_square(f, r)); ++f) ++emptyCnt;
+    Color  us   = sideToMove;
+    Square from = m.from_sq();
+    Square to   = m.to_sq();
 
-            if (emptyCnt) ss << emptyCnt;
+    assert(color_of(moved_piece(m)) == us);
+    assert(piece_on(square<KING>(us)) == make_piece(us, KING));
 
-            if (f <= FILE_D) ss << PieceToChar[piece_on(make_square(f, r))];
-        }
+    // If the moving piece is a king, check whether the destination square is
+    // attacked by the opponent.
+    if (type_of(piece_on(from)) == KING) return !(attackers_to_exist(to, pieces() ^ from, ~us));
 
-        if (r > RANK_1) ss << '/';
+    // A non-king move is legal if and only if it is not pinned or it
+    // is moving along the ray towards or away from the king.
+    return !(blockers_for_king(us) & from);
+}
+
+// Calculates st->blockersForKing[c],
+// which store respectively the pieces preventing king of color c from being in check
+void Position::update_slider_blockers(Color c) const {
+    Square ksq = square<KING>(c);
+
+    st->blockersForKing[c] = 0;
+
+    // Enemy horses that geometrically attack ksq (reverse pseudo)
+    Bitboard snipers = (attacks_bb<HORSE>(ksq) & pieces(HORSE)) & pieces(~c);
+
+    // Ignore snipers themselves in occupancy
+    Bitboard occupancy = pieces() ^ snipers;
+
+    while (snipers) {
+        Square sniperSq = pop_lsb(snipers);
+
+        // Leg square required for this horse to attack the king
+        Bitboard leg = horse_leg_bb(sniperSq, ksq);
+
+        // If that leg square is occupied by our piece, it's a blocker
+        Bitboard b = leg & occupancy & pieces(c);
+        if (b) st->blockersForKing[c] |= b;
     }
-
-    ss << (sideToMove == WHITE ? " w " : " b ");
-
-    ss << " " << 1 + (gamePly - (sideToMove == BLACK)) / 2;
-
-    return ss.str();
 }
 
 // Makes a move, and saves all information necessary
@@ -336,6 +389,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
 
     sideToMove = ~sideToMove;
+
+    // Update king attacks used for fast check detection
+    set_check_info();
 
     // Update the key with the final value
     st->key = k;

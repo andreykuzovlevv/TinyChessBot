@@ -6,6 +6,9 @@
 
 namespace tiny {
 
+constexpr int MAX_MOVES = 128;
+constexpr int MAX_PLY   = 256;
+
 using Bitboard = uint16_t;  // 16-bit board
 using Key      = uint64_t;
 

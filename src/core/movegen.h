@@ -10,7 +10,7 @@ namespace tiny {
 
 class Position;
 
-enum GenType { CAPTURES, QUIETS, EVASIONS, NON_EVASIONS, LEGAL };
+enum GenType { EVASIONS, NON_EVASIONS, LEGAL };
 
 struct ExtMove : public Move {
     int value;

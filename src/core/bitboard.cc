@@ -86,6 +86,11 @@ void Bitboards::init() {
         for (int step : {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST})
             PseudoAttacks[FERZ][s1] |= safe_destination(s1, step);
 
+        for (int step :
+             {NORTH + NORTH_WEST, NORTH + NORTH_EAST, EAST + NORTH_EAST, EAST + SOUTH_EAST,
+              SOUTH + SOUTH_EAST, SOUTH + SOUTH_WEST, WEST + SOUTH_WEST, WEST + NORTH_WEST})
+            PseudoAttacks[HORSE][s1] |= safe_destination(s1, step);
+
         // Fill Horse Leg Squares and Attacks per each direction
         for (const auto& item : LEG_DIRS) {
             Square leg = Square(int(s1) + item.delta);
