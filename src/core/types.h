@@ -283,11 +283,16 @@ class Move {
         std::size_t operator()(const Move& m) const { return make_key(m.data); }
     };
 
+    // Allow streaming via free function operator<< defined in namespace scope
+    friend inline std::ostream& operator<<(std::ostream& os, const Move& m);
+
    protected:
     std::uint16_t data;
 };
 
 inline std::string to_string(Move m);
+inline const char* pt_code(PieceType pt);
+inline void        square_to_cstr(Square s, char out[3]);
 
 inline std::ostream& operator<<(std::ostream& os, const Move& m) { return os << to_string(m); }
 

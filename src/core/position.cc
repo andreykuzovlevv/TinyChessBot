@@ -32,9 +32,15 @@ namespace {
 static constexpr Piece Pieces[] = {W_PAWN, W_HORSE, W_FERZ, W_WAZIR, W_KING,
                                    B_PAWN, B_HORSE, B_FERZ, B_WAZIR, B_KING};
 
-// Piece to character mapping for FEN output
-constexpr std::string_view PieceToChar = " PWFUK   pwfuk  ";
+// Piece to character mapping for FEN input/output
+// Indices map to Piece enum: [0]=NO_PIECE, [1]=W_PAWN('P'), [2]=W_HORSE('U'),
+// [3]=W_FERZ('F'), [4]=W_WAZIR('W'), [5]=W_KING('K'), then lowercase for black.
+constexpr std::string_view PieceToChar = " PUFWK   pufwk  ";
 }  // namespace
+
+std::string square_string(Square s) {
+    return std::string{char('a' + file_of(s)), char('1' + rank_of(s))};
+}
 
 // Returns an ASCII representation of the position
 std::ostream& operator<<(std::ostream& os, const Position& pos) {
@@ -51,7 +57,7 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
        << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
        << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: ";
 
-    // for (Bitboard b = pos.checkers(); b;) os << UCIEngine::square(pop_lsb(b)) << " ";
+    for (Bitboard b = pos.checkers(); b;) os << square_string(pop_lsb(b)) << " ";
 
     return os;
 }

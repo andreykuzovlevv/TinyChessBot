@@ -52,7 +52,5 @@ int main() {
     for (Move m : MoveList<LEGAL>(pos)) {
         std::cout << m << '\n';
     }
-
-    printf("%lld\n", MoveList<LEGAL>(pos).size());
     std::cout << pos;
 }
