@@ -59,6 +59,8 @@ constexpr Bitboard operator^(Square s, Bitboard b) { return b ^ s; }
 
 constexpr Bitboard operator|(Square s1, Square s2) { return square_bb(s1) | s2; }
 
+constexpr bool more_than_one(Bitboard b) { return b & (b - 1); }
+
 // Moves a bitboard one or two steps as specified by the direction D
 template <Direction D>
 constexpr Bitboard shift(Bitboard b) {

@@ -7,67 +7,9 @@
 #include "bitboard.h"
 #include "position.h"
 
-#if defined(USE_AVX512ICL)
-#include <immintrin.h>
-
-#include <algorithm>
-#include <array>
-#endif
-
 namespace tiny {
 
 namespace {
-
-#if defined(USE_AVX512ICL)
-
-inline Move* write_moves(Move* moveList, uint32_t mask, __m512i vector) {
-    // Avoid _mm512_mask_compressstoreu_epi16() as it's 256 uOps on Zen4
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(moveList),
-                        _mm512_maskz_compress_epi16(mask, vector));
-    return moveList + popcount(mask);
-}
-
-template <Direction offset>
-inline Move* splat_pawn_moves(Move* moveList, Bitboard to_bb) {
-    alignas(64) static constexpr auto SPLAT_TABLE = [] {
-        std::array<Move, 64> table{};
-        for (int8_t i = 0; i < 64; i++) {
-            Square from{std::clamp<int8_t>(i - offset, 0, 63)};
-            table[i] = {Move(from, Square{i})};
-        }
-        return table;
-    }();
-
-    auto table = reinterpret_cast<const __m512i*>(SPLAT_TABLE.data());
-
-    moveList =
-        write_moves(moveList, static_cast<uint32_t>(to_bb >> 0), _mm512_load_si512(table + 0));
-    moveList =
-        write_moves(moveList, static_cast<uint32_t>(to_bb >> 32), _mm512_load_si512(table + 1));
-
-    return moveList;
-}
-
-inline Move* splat_moves(Move* moveList, Square from, Bitboard to_bb) {
-    alignas(64) static constexpr auto SPLAT_TABLE = [] {
-        std::array<Move, 64> table{};
-        for (int8_t i = 0; i < 64; i++) table[i] = {Move(SQUARE_ZERO, Square{i})};
-        return table;
-    }();
-
-    __m512i fromVec = _mm512_set1_epi16(Move(from, SQUARE_ZERO).raw());
-
-    auto table = reinterpret_cast<const __m512i*>(SPLAT_TABLE.data());
-
-    moveList = write_moves(moveList, static_cast<uint32_t>(to_bb >> 0),
-                           _mm512_or_si512(_mm512_load_si512(table + 0), fromVec));
-    moveList = write_moves(moveList, static_cast<uint32_t>(to_bb >> 32),
-                           _mm512_or_si512(_mm512_load_si512(table + 1), fromVec));
-
-    return moveList;
-}
-
-#else
 
 template <Direction offset>
 inline Move* splat_pawn_moves(Move* moveList, Bitboard to_bb) {
@@ -83,88 +25,62 @@ inline Move* splat_moves(Move* moveList, Square from, Bitboard to_bb) {
     return moveList;
 }
 
-#endif
-
-template <GenType Type, Direction D, bool Enemy>
+template <GenType Type, Direction D>
 Move* make_promotions(Move* moveList, [[maybe_unused]] Square to) {
-    constexpr bool all = Type == EVASIONS || Type == NON_EVASIONS;
-
-    if constexpr (Type == CAPTURES || all) *moveList++ = Move::make<PROMOTION>(to - D, to, QUEEN);
-
-    if constexpr ((Type == CAPTURES && Enemy) || (Type == QUIETS && !Enemy) || all) {
-        *moveList++ = Move::make<PROMOTION>(to - D, to, ROOK);
-        *moveList++ = Move::make<PROMOTION>(to - D, to, BISHOP);
-        *moveList++ = Move::make<PROMOTION>(to - D, to, KNIGHT);
-    }
+    *moveList++ = Move::make<PROMOTION>(to - D, to, HORSE);
+    *moveList++ = Move::make<PROMOTION>(to - D, to, FERZ);
+    *moveList++ = Move::make<PROMOTION>(to - D, to, WAZIR);
 
     return moveList;
 }
 
 template <Color Us, GenType Type>
 Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) {
-    constexpr Color     Them     = ~Us;
-    constexpr Bitboard  TRank7BB = (Us == WHITE ? Rank7BB : Rank2BB);
-    constexpr Bitboard  TRank3BB = (Us == WHITE ? Rank3BB : Rank6BB);
-    constexpr Direction Up       = pawn_push(Us);
-    constexpr Direction UpRight  = (Us == WHITE ? NORTH_EAST : SOUTH_WEST);
-    constexpr Direction UpLeft   = (Us == WHITE ? NORTH_WEST : SOUTH_EAST);
+    constexpr Color    Them     = ~Us;
+    constexpr Bitboard TRank3BB = (Us == WHITE ? Rank3BB : Rank2BB);
+    // constexpr Bitboard  TRank3BB = (Us == WHITE ? Rank3BB : Rank6BB);
+    constexpr Direction Up      = pawn_push(Us);
+    constexpr Direction UpRight = (Us == WHITE ? NORTH_EAST : SOUTH_WEST);
+    constexpr Direction UpLeft  = (Us == WHITE ? NORTH_WEST : SOUTH_EAST);
 
     const Bitboard emptySquares = ~pos.pieces();
     const Bitboard enemies      = Type == EVASIONS ? pos.checkers() : pos.pieces(Them);
 
-    Bitboard pawnsOn7    = pos.pieces(Us, PAWN) & TRank7BB;
-    Bitboard pawnsNotOn7 = pos.pieces(Us, PAWN) & ~TRank7BB;
+    Bitboard pawnsOn3    = pos.pieces(Us, PAWN) & TRank3BB;
+    Bitboard pawnsNotOn3 = pos.pieces(Us, PAWN) & ~TRank3BB;
 
-    // Single and double pawn pushes, no promotions
-    if constexpr (Type != CAPTURES) {
-        Bitboard b1 = shift<Up>(pawnsNotOn7) & emptySquares;
-        Bitboard b2 = shift<Up>(b1 & TRank3BB) & emptySquares;
+    // Single pawn pushes, no promotions
+    Bitboard b1 = shift<Up>(pawnsNotOn3) & emptySquares;
 
-        if constexpr (Type == EVASIONS)  // Consider only blocking squares
-        {
-            b1 &= target;
-            b2 &= target;
-        }
-
-        moveList = splat_pawn_moves<Up>(moveList, b1);
-        moveList = splat_pawn_moves<Up + Up>(moveList, b2);
+    if constexpr (Type == EVASIONS)  // Consider only blocking squares
+    {
+        b1 &= target;
     }
 
-    // Promotions and underpromotions
-    if (pawnsOn7) {
-        Bitboard b1 = shift<UpRight>(pawnsOn7) & enemies;
-        Bitboard b2 = shift<UpLeft>(pawnsOn7) & enemies;
-        Bitboard b3 = shift<Up>(pawnsOn7) & emptySquares;
+    moveList = splat_pawn_moves<Up>(moveList, b1);
+
+    // Promotions
+    if (pawnsOn3) {
+        Bitboard b1 = shift<UpRight>(pawnsOn3) & enemies;
+        Bitboard b2 = shift<UpLeft>(pawnsOn3) & enemies;
+        Bitboard b3 = shift<Up>(pawnsOn3) & emptySquares;
 
         if constexpr (Type == EVASIONS) b3 &= target;
 
-        while (b1) moveList = make_promotions<Type, UpRight, true>(moveList, pop_lsb(b1));
+        while (b1) moveList = make_promotions<Type, UpRight>(moveList, pop_lsb(b1));
 
-        while (b2) moveList = make_promotions<Type, UpLeft, true>(moveList, pop_lsb(b2));
+        while (b2) moveList = make_promotions<Type, UpLeft>(moveList, pop_lsb(b2));
 
-        while (b3) moveList = make_promotions<Type, Up, false>(moveList, pop_lsb(b3));
+        while (b3) moveList = make_promotions<Type, Up>(moveList, pop_lsb(b3));
     }
 
-    // Standard and en passant captures
-    if constexpr (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS) {
-        Bitboard b1 = shift<UpRight>(pawnsNotOn7) & enemies;
-        Bitboard b2 = shift<UpLeft>(pawnsNotOn7) & enemies;
+    // Standard captures
+    if constexpr (Type == EVASIONS || Type == NON_EVASIONS) {
+        Bitboard b1 = shift<UpRight>(pawnsNotOn3) & enemies;
+        Bitboard b2 = shift<UpLeft>(pawnsNotOn3) & enemies;
 
         moveList = splat_pawn_moves<UpRight>(moveList, b1);
         moveList = splat_pawn_moves<UpLeft>(moveList, b2);
-
-        if (pos.ep_square() != SQ_NONE) {
-            assert(rank_of(pos.ep_square()) == relative_rank(Us, RANK_6));
-
-            // An en passant capture cannot resolve a discovered check
-            if (Type == EVASIONS && (target & (pos.ep_square() + Up))) return moveList;
-
-            b1 = pawnsNotOn7 & attacks_bb<PAWN>(pos.ep_square(), Them);
-
-            assert(b1);
-
-            while (b1) *moveList++ = Move::make<EN_PASSANT>(pop_lsb(b1), pos.ep_square());
-        }
     }
 
     return moveList;
@@ -195,26 +111,35 @@ Move* generate_all(const Position& pos, Move* moveList) {
 
     // Skip generating non-king moves when in double check
     if (Type != EVASIONS || !more_than_one(pos.checkers())) {
-        target = Type == EVASIONS       ? between_bb(ksq, lsb(pos.checkers()))
-                 : Type == NON_EVASIONS ? ~pos.pieces(Us)
-                 : Type == CAPTURES     ? pos.pieces(~Us)
-                                        : ~pos.pieces();  // QUIETS
+        if constexpr (Type == EVASIONS) {
+            // We are in EVASIONS and NOT double check here
+            Bitboard checkers = pos.checkers();
+            Square   checker  = lsb(checkers);
+
+            Bitboard checkerBB    = square_bb(checker);
+            bool     horseChecker = (pos.pieces(HORSE) & checkerBB) != 0;
+
+            if (horseChecker) {
+                // Block on the leg or capture the horse
+                // NOTE: horse_leg_bb expects (attacker, king)
+                target = horse_leg_bb(checker, ksq) | checkerBB;
+            } else {
+                target = checkerBB;
+            }
+        } else {
+            // NON_EVASIONS: any square not occupied by our pieces
+            target = ~pos.pieces(Us);
+        }
 
         moveList = generate_pawn_moves<Us, Type>(pos, moveList, target);
-        moveList = generate_moves<Us, KNIGHT>(pos, moveList, target);
-        moveList = generate_moves<Us, BISHOP>(pos, moveList, target);
-        moveList = generate_moves<Us, ROOK>(pos, moveList, target);
-        moveList = generate_moves<Us, QUEEN>(pos, moveList, target);
+        moveList = generate_moves<Us, HORSE>(pos, moveList, target);
+        moveList = generate_moves<Us, FERZ>(pos, moveList, target);
+        moveList = generate_moves<Us, WAZIR>(pos, moveList, target);
     }
 
     Bitboard b = attacks_bb<KING>(ksq) & (Type == EVASIONS ? ~pos.pieces(Us) : target);
 
     moveList = splat_moves(moveList, ksq, b);
-
-    if ((Type == QUIETS || Type == NON_EVASIONS) && pos.can_castle(Us & ANY_CASTLING))
-        for (CastlingRights cr : {Us & KING_SIDE, Us & QUEEN_SIDE})
-            if (!pos.castling_impeded(cr) && pos.can_castle(cr))
-                *moveList++ = Move::make<CASTLING>(ksq, pos.castling_rook_square(cr));
 
     return moveList;
 }

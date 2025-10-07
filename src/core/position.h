@@ -129,12 +129,12 @@ class Position {
     void move_piece(Square from, Square to);
 
     // Data members
-    Piece      board[SQUARE_NB];  // mailbox
-    Bitboard   byTypeBB[PIECE_TYPE_NB];
-    Bitboard   byColorBB[COLOR_NB];
-    int        pieceCount[PIECE_NB];
-    Color      sideToMove;
-    Pockets    pockets;
+    Piece    board[SQUARE_NB];  // mailbox
+    Bitboard byTypeBB[PIECE_TYPE_NB];
+    Bitboard byColorBB[COLOR_NB];
+    int      pieceCount[PIECE_NB];
+    Color    sideToMove;
+    // Pocket    pockets;
     StateInfo* st;
     int        gamePly;
 };

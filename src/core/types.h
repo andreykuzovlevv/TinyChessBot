@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <ostream>
+#include <string>
 
 namespace tiny {
 
@@ -142,6 +144,11 @@ enum Direction : int8_t {
 enum File : int8_t { FILE_A, FILE_B, FILE_C, FILE_D, FILE_NB };
 enum Rank : int8_t { RANK_1, RANK_2, RANK_3, RANK_4, RANK_NB };
 
+class Pocket {
+   protected:
+    uint8_t data;
+};
+
 #define ENABLE_INCR_OPERATORS_ON(T)                             \
     constexpr T& operator++(T& d) { return d = T(int(d) + 1); } \
     constexpr T& operator--(T& d) { return d = T(int(d) - 1); }
@@ -188,9 +195,7 @@ constexpr Rank relative_rank(Color c, Rank r) { return Rank(r ^ (c * 7)); }
 
 constexpr Rank relative_rank(Color c, Square s) { return relative_rank(c, rank_of(s)); }
 
-struct Pockets {
-    uint8_t p[COLOR_NB][PIECE_TYPE_NB];  // Only {PAWN,WAZIR,HORSE,FERZ} used; KING always 0
-};
+constexpr Direction pawn_push(Color c) { return c == WHITE ? NORTH : SOUTH; }
 
 enum MoveType { NORMAL, PROMOTION = 1 << 14, DROP = 2 << 14 };
 
@@ -199,121 +204,137 @@ constexpr Key make_key(uint64_t seed) {
     return seed * 6364136223846793005ULL + 1442695040888963407ULL;
 }
 
-// -------------- Move encoding for 4×4 Tinyhouse -----------------
-//
-// 16-bit move packing:
-//  bits 0-3 : to   (0..15)
-//  bits 4-7 : from (0..15) [ignored for DROP]
-//  bits 8-9 : AUX  (promo or drop payload; see below)
-//  bits 10-13 : reserved (0)
-//  bits 14-15 : type (0=NORMAL, 1=PROMOTION, 2=DROP)
-//
-// AUX meaning:
-//   PROMOTION: 0=WAZIR, 1=FERZ, 2=HORSE
-//   DROP     : 0=PAWN, 1=HORSE, 2=FERZ, 3=WAZIR
-//
-// No en passant, no castling in this variant.
-
+// Stockfish-compatible 16-bit move container.
 class Move {
    public:
-    Move() = default;
+    Move() = default;  // Defaulted ctor: leaves 'data' uninitialized on purpose (matches SF style).
+
+    // Construct directly from the packed 16-bit payload.
     constexpr explicit Move(std::uint16_t d) : data(d) {}
 
-    // Normal move ctor (no promo)
-    constexpr Move(Square from, Square to) : data((std::uint16_t(from) << 4) | std::uint16_t(to)) {}
+    // Normal move: from -> to, with type = NORMAL
+    constexpr Move(Square from, Square to) : data((std::uint16_t(from) << 6) + std::uint16_t(to)) {}
 
-    // --- Factories ---
+    // Generic factory for SPECIAL moves (PROMOTION/DROP).
+    // Matches Stockfish's pattern: Move::make<PROMOTION>(from, to, pt);
+    // For DROP, pass from == to (conventionally) or any value; only 'to' matters.
+    template <MoveType T>
+    static constexpr Move make(Square from, Square to, PieceType pt) {
+        static_assert(T == PROMOTION || T == DROP, "Only PROMOTION or DROP are valid here");
+        // Map aux payload into bits 12..13:
+        //  - PROMOTION: encode (pt - HORSE) in [0..3]  (HORSE, FERZ, WAZIR; 4th value
+        //  reserved/invalid)
+        //  - DROP:      encode (pt - PAWN)  in [0..3]  (PAWN, HORSE, FERZ, WAZIR)
+        const std::uint16_t aux =
+            (T == PROMOTION) ? (std::uint16_t(std::uint16_t(pt) - std::uint16_t(HORSE)) << 12)
+                             : (std::uint16_t(std::uint16_t(pt) - std::uint16_t(PAWN)) << 12);
 
-    static constexpr Move make_normal(Square from, Square to) {
-        return Move((std::uint16_t(from) << 4) | std::uint16_t(to));
+        return Move(std::uint16_t(T) + aux + (std::uint16_t(from) << 6) + std::uint16_t(to));
     }
 
-    // Promotions: pt must be one of {WAZIR, FERZ, HORSE}
-    static constexpr Move make_promotion(Square from, Square to, PieceType pt) {
-        return Move((std::uint16_t(1) << 14)     // type = PROMOTION
-                    | (aux_from_promo(pt) << 8)  // AUX
-                    | (std::uint16_t(from) << 4) | std::uint16_t(to));
-    }
-
-    // Drops: pt must be one of {PAWN, WAZIR, FERZ, HORSE}
-    // 'from' is ignored by the engine for DROP; we store from=to to keep it compact.
-    static constexpr Move make_drop(PieceType pt, Square to) {
-        return Move((std::uint16_t(2) << 14)    // type = DROP
-                    | (aux_from_drop(pt) << 8)  // AUX
-                    | (std::uint16_t(to) << 4)  // from := to
-                    | std::uint16_t(to));
-    }
-
-    // --- Accessors ---
-
+    // Accessors
     constexpr Square from_sq() const {
         assert(is_ok());
-        return Square((data >> 4) & 0x0F);
+        return Square((data >> 6) &
+                      0x3F);  // mask 6 bits (compatible with 0..63; we only use 0..15)
     }
 
     constexpr Square to_sq() const {
         assert(is_ok());
-        return Square(data & 0x0F);
+        return Square(data & 0x3F);
     }
 
-    // Low 12 bits: from/to/AUX nibble bundle (kept for hashing/move ordering uses)
+    // Low 12 bits (to + from) — handy for TT indexing or move ordering keys.
     constexpr int from_to() const { return data & 0x0FFF; }
 
-    constexpr MoveType type_of() const {
-        return MoveType((data >> 14) & 0x3);  // 0..2 used
-    }
+    // Special move kind.
+    constexpr MoveType type_of() const { return MoveType(data & (3u << 14)); }
 
-    // Valid only if type_of()==PROMOTION; else returns NO_PIECE_TYPE.
+    // Promotion target: valid only if type_of() == PROMOTION.
+    // Decodes bits 12..13 with HORSE as base.
     constexpr PieceType promotion_type() const {
-        if (type_of() != PROMOTION) return NO_PIECE_TYPE;
-        return promo_from_aux((data >> 8) & 0x3);
+        return PieceType(((data >> 12) & 0x3) + std::uint16_t(HORSE));
     }
 
-    // Valid only if type_of()==DROP; else returns NO_PIECE_TYPE.
-    constexpr PieceType drop_piece_type() const {
-        if (type_of() != DROP) return NO_PIECE_TYPE;
-        return drop_from_aux((data >> 8) & 0x3);
+    // Drop piece: valid only if type_of() == DROP.
+    // Decodes bits 12..13 with PAWN as base.
+    constexpr PieceType drop_piece() const {
+        return PieceType(((data >> 12) & 0x3) + std::uint16_t(PAWN));
     }
 
-    constexpr bool is_ok() const { return none().data != data && null().data != data; }
+    // “Is a real move-like value” (not none/null sentinels). Matches Stockfish’s semantics.
+    constexpr bool is_ok() const { return data != none().data && data != null().data; }
 
-    // Special sentinels
-    static constexpr Move none() { return Move(0); }
-    // Keep a harmless from==to sentinel. Any (from==to) is not a legal move.
+    // Null & none sentinels.
     static constexpr Move null() {
-        return Move((std::uint16_t(SQ_A1) << 4) | std::uint16_t(SQ_A1));
-    }
+        return Move(65);
+    }  // 0b0000'0000'0100'0001 (from=1,to=1), flags=0
+    static constexpr Move none() { return Move(0); }
 
-    constexpr bool          operator==(const Move& m) const { return data == m.data; }
-    constexpr bool          operator!=(const Move& m) const { return data != m.data; }
-    constexpr explicit      operator bool() const { return data != 0; }
+    // Comparisons / truthiness
+    constexpr bool     operator==(const Move& m) const { return data == m.data; }
+    constexpr bool     operator!=(const Move& m) const { return data != m.data; }
+    constexpr explicit operator bool() const { return data != 0; }  // false only for Move::none()
+
+    // Raw bits (for hashing, serialization, etc.)
     constexpr std::uint16_t raw() const { return data; }
 
     struct MoveHash {
         std::size_t operator()(const Move& m) const { return make_key(m.data); }
     };
 
-    // Map promotion piece -> AUX code (0..2)
-    static constexpr std::uint16_t aux_from_promo(PieceType pt) {
-        // 0=WAZIR, 1=FERZ, 2=HORSE
-        return pt == WAZIR ? 0u : pt == FERZ ? 1u : /*HORSE*/ 2u;
-    }
-    static constexpr PieceType promo_from_aux(std::uint16_t aux) {
-        return aux == 0 ? WAZIR : aux == 1 ? FERZ : HORSE;
-    }
-
-    // Map drop piece -> AUX code (0..3)
-    static constexpr std::uint16_t aux_from_drop(PieceType pt) {
-        // 0=PAWN, 1=WAZIR, 2=FERZ, 3=HORSE
-        return pt == PAWN ? 0u : pt == WAZIR ? 1u : pt == FERZ ? 2u : 3u;  // HORSE
-    }
-    static constexpr PieceType drop_from_aux(std::uint16_t aux) {
-        return aux == 0 ? PAWN : aux == 1 ? WAZIR : aux == 2 ? FERZ : HORSE;
-    }
-
    protected:
-    std::uint16_t data{};
+    std::uint16_t data;
 };
+
+inline std::string to_string(Move m);
+
+inline std::ostream& operator<<(std::ostream& os, const Move& m) { return os << to_string(m); }
+
+inline std::string to_string(Move m) {
+    char from[3], to[3];
+    square_to_cstr(m.from_sq(), from);
+    square_to_cstr(m.to_sq(), to);
+
+    switch (m.type_of()) {
+        case NORMAL:
+            return std::string(from) + to;  // e.g. "a2a3"
+        case PROMOTION:
+            return std::string(from) + to + "=" + pt_code(m.promotion_type());  // "a3a4=H"
+        case DROP:
+            return std::string(pt_code(m.drop_piece())) + "@" + to;  // "P@b2"
+        default:
+            return "??";
+    }
+}
+
+inline const char* pt_code(PieceType pt) {
+    switch (pt) {
+        case PAWN:
+            return "P";
+        case HORSE:
+            return "H";
+        case FERZ:
+            return "F";
+        case WAZIR:
+            return "W";
+        case KING:
+            return "K";
+        default:
+            return "?";
+    }
+}
+
+inline void square_to_cstr(Square s, char out[3]) {
+    if (s < 0 || s >= SQUARE_NB) {
+        out[0] = out[1] = '-';
+        out[2]          = 0;
+        return;
+    }
+    out[0] = char('a' + (int(s) % 4));
+    out[1] = char('1' + (int(s) / 4));
+    out[2] = 0;
+}
 
 }  // namespace tiny
 

@@ -49,7 +49,10 @@ int main() {
 
     pos.set(fen, &si);
 
-    printf("%d\n", MoveList<LEGAL>(pos).size());
+    for (Move m : MoveList<LEGAL>(pos)) {
+        std::cout << m << '\n';
+    }
 
+    printf("%lld\n", MoveList<LEGAL>(pos).size());
     std::cout << pos;
 }
