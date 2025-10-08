@@ -42,9 +42,14 @@ std::string square_string(Square s) {
     return std::string{char('a' + file_of(s)), char('1' + rank_of(s))};
 }
 
-// Returns an ASCII representation of the position
+// Returns an ASCII representation of the position (with pockets)
 std::ostream& operator<<(std::ostream& os, const Position& pos) {
-    os << "\n +---+---+---+---+\n";
+    // Top pocket for black
+    {
+        os << "\n+[" << pos.pocket(BLACK).to_string(BLACK) << "]+\n";
+    }
+
+    os << " +---+---+---+---+\n";
 
     for (Rank r = RANK_4; r >= RANK_1; --r) {
         for (File f = FILE_A; f <= FILE_D; ++f)
@@ -54,10 +59,12 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     }
 
     os << "   a   b   c   d\n"
+       << "+[" << pos.pocket(WHITE).to_string(WHITE) << "]+\n"
        << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
-       << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: ";
+       << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: [";
 
     for (Bitboard b = pos.checkers(); b;) os << square_string(pop_lsb(b)) << " ";
+    os << "]\n\n";
 
     return os;
 }
@@ -212,6 +219,14 @@ string Position::fen() const {
 void Position::set_check_info() const {
     update_slider_blockers(WHITE);
     update_slider_blockers(BLACK);
+
+    Square ksq = square<KING>(~sideToMove);
+
+    st->checkSquares[PAWN]  = attacks_bb<PAWN>(ksq, ~sideToMove);
+    st->checkSquares[HORSE] = attacks_bb<HORSE>(ksq);
+    st->checkSquares[FERZ]  = attacks_bb<FERZ>(ksq, pieces());
+    st->checkSquares[WAZIR] = attacks_bb<WAZIR>(ksq, pieces());
+    st->checkSquares[KING]  = 0;
 }
 
 // Computes the hash keys of the position, and other
@@ -320,9 +335,35 @@ void Position::update_slider_blockers(Color c) const {
         // Leg square required for this horse to attack the king
         Bitboard leg = horse_leg_bb(sniperSq, ksq);
 
-        // If that leg square is occupied by our piece, it's a blocker
-        Bitboard b = leg & occupancy & pieces(c);
+        // If that leg square is occupied by piece, it's a blocker
+        Bitboard b = leg & occupancy;
         if (b) st->blockersForKing[c] |= b;
+    }
+}
+
+// Tests whether a pseudo-legal move gives a check
+bool Position::gives_check(Move m) const {
+    assert(m.is_ok());
+    assert(color_of(moved_piece(m)) == sideToMove);
+
+    Square from = m.from_sq();
+    Square to   = m.to_sq();
+
+    // Is there a direct check?
+    if (check_squares(type_of(piece_on(from))) & to) return true;
+
+    // Is there a discovered check?
+    if (blockers_for_king(~sideToMove) & from) return true;
+
+    switch (m.type_of()) {
+        case NORMAL:
+            return false;
+
+        case PROMOTION:
+            return attacks_bb(m.promotion_type(), to, pieces() ^ from) & pieces(~sideToMove, KING);
+
+        case DROP:
+            return attacks_bb(m.drop_piece(), to, pieces()) & pieces(~sideToMove, KING);
     }
 }
 
@@ -355,20 +396,23 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     Piece  pc       = piece_on(from);
     Piece  captured = piece_on(to);
 
+    printf("Moving from %s to %s, with a %d Piece", square_string(from).c_str(),
+           square_string(to).c_str(), pc);
+
     assert(color_of(pc) == us);
     assert(captured == NO_PIECE || color_of(captured) == them);
     assert(type_of(captured) != KING);
 
     if (captured) {
-        Square capsq = to;
-
         // Update board and piece lists
-        remove_piece(capsq);
-        k ^= Zobrist::psq[captured][capsq];
+        remove_piece(to);
+        k ^= Zobrist::psq[captured][to];
+    }
 
-    } else
-        // Update hash key
-        k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
+    // Update hash key
+    k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
+
+    move_piece(from, to);
 
     // If the moving piece is a pawn do some special extra work
     if (type_of(pc) == PAWN) {
@@ -457,6 +501,28 @@ void Position::undo_move(Move m) {
     --gamePly;
 
     assert(pos_is_ok());
+}
+
+// Tests whether the position is drawn by repetition. It does not detect stalemates.
+bool Position::is_draw(int ply) const { return is_repetition(ply); }
+
+// Return a draw score if a position repeats once earlier but strictly
+// after the root, or repeats twice before or at the root.
+bool Position::is_repetition(int ply) const { return st->repetition && st->repetition < ply; }
+
+bool Position::is_threefold_game() const {
+    // Count occurrences of current key since last irreversible.
+    int              cnt = 0;
+    const StateInfo* s   = st;
+    const auto       key = st->key;
+
+    while (s) {
+        if (s->key == key) {
+            if (++cnt >= 3) return true;
+        }
+        s = s->previous;
+    }
+    return false;
 }
 
 // Performs some consistency checks for the position object

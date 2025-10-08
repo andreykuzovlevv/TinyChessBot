@@ -45,6 +45,7 @@ struct StateInfo {
     Bitboard   checkersBB;
     StateInfo* previous;
     Bitboard   blockersForKing[COLOR_NB];
+    Bitboard   checkSquares[PIECE_TYPE_NB];
     Piece      capturedPiece;
     int        repetition;
 };
@@ -72,6 +73,8 @@ class Position {
     template <typename... PieceTypes>
     Bitboard pieces(Color c, PieceTypes... pts) const;
 
+    Pocket pocket(Color c) const;
+
     inline Piece piece_on(Square s) const {
         assert(is_ok(s));
         return board[s];
@@ -87,6 +90,7 @@ class Position {
     // Checking
     Bitboard checkers() const;
     Bitboard blockers_for_king(Color c) const;
+    Bitboard check_squares(PieceType pt) const;
 
     // Attacks to/from a given square
     Bitboard attackers_to(Square s) const;
@@ -96,9 +100,11 @@ class Position {
 
     // Properties of moves
     bool  legal(Move m) const;
+    bool  gives_check(Move m) const;
     Piece moved_piece(Move m) const;
 
     // Doing and undoing moves
+    void do_move(Move m, StateInfo& newSt);
     void do_move(Move m, StateInfo& newSt, bool givesCheck);
     void undo_move(Move m);
 
@@ -112,6 +118,7 @@ class Position {
     bool         is_repetition(int ply) const;
     bool         upcoming_repetition(int ply) const;
     bool         has_repeated() const;
+    bool         is_threefold_game() const;
 
     // Position consistency check, for debugging
     bool pos_is_ok() const;
@@ -129,12 +136,12 @@ class Position {
     void move_piece(Square from, Square to);
 
     // Data members
-    Piece    board[SQUARE_NB];  // mailbox
-    Bitboard byTypeBB[PIECE_TYPE_NB];
-    Bitboard byColorBB[COLOR_NB];
-    int      pieceCount[PIECE_NB];
-    Color    sideToMove;
-    // Pocket    pockets;
+    Piece      board[SQUARE_NB];  // mailbox
+    Bitboard   byTypeBB[PIECE_TYPE_NB];
+    Bitboard   byColorBB[COLOR_NB];
+    int        pieceCount[PIECE_NB];
+    Color      sideToMove;
+    Pocket     pockets[COLOR_NB];
     StateInfo* st;
     int        gamePly;
 };
@@ -144,6 +151,8 @@ std::ostream& operator<<(std::ostream& os, const Position& pos);
 inline Key Position::key() const { return st->key; }
 
 inline Piece Position::moved_piece(Move m) const { return piece_on(m.from_sq()); }
+
+inline Pocket Position::pocket(Color c) const { return pockets[c]; }
 
 inline Bitboard Position::pieces() const { return byTypeBB[ALL_PIECES]; }
 
@@ -180,6 +189,7 @@ inline Bitboard Position::attackers_to(Square s) const { return attackers_to(s, 
 inline Bitboard Position::checkers() const { return st->checkersBB; }
 
 inline Bitboard Position::blockers_for_king(Color c) const { return st->blockersForKing[c]; }
+inline Bitboard Position::check_squares(PieceType pt) const { return st->checkSquares[pt]; }
 
 inline void Position::put_piece(Piece pc, Square s) {
     board[s] = pc;
@@ -208,6 +218,9 @@ inline void Position::move_piece(Square from, Square to) {
     board[from] = NO_PIECE;
     board[to]   = pc;
 }
+
+inline void Position::do_move(Move m, StateInfo& newSt) { do_move(m, newSt, gives_check(m)); }
+
 }  // namespace tiny
 
 #endif  // #ifndef POSITION_H_INCLUDED

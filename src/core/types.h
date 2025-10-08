@@ -144,11 +144,6 @@ enum Direction : int8_t {
 enum File : int8_t { FILE_A, FILE_B, FILE_C, FILE_D, FILE_NB };
 enum Rank : int8_t { RANK_1, RANK_2, RANK_3, RANK_4, RANK_NB };
 
-class Pocket {
-   protected:
-    uint8_t data;
-};
-
 #define ENABLE_INCR_OPERATORS_ON(T)                             \
     constexpr T& operator++(T& d) { return d = T(int(d) + 1); } \
     constexpr T& operator--(T& d) { return d = T(int(d) - 1); }
@@ -198,6 +193,52 @@ constexpr Rank relative_rank(Color c, Square s) { return relative_rank(c, rank_o
 constexpr Direction pawn_push(Color c) { return c == WHITE ? NORTH : SOUTH; }
 
 enum MoveType { NORMAL, PROMOTION = 1 << 14, DROP = 2 << 14 };
+
+class Pocket {
+   public:
+    constexpr Pocket() : data(0) {}
+
+    // Read 2-bit counter for a piece type (PAWN..WAZIR)
+    constexpr uint8_t count(PieceType pt) const {
+        return (pt >= PAWN && pt <= WAZIR) ? uint8_t((data >> (2 * (pt - PAWN))) & 0x3) : 0;
+    }
+
+    // Set 2-bit counter clamped to [0,2]
+    constexpr void set_count(PieceType pt, uint8_t c) {
+        if (pt < PAWN || pt > WAZIR) return;
+        const uint8_t shift = uint8_t(2 * (pt - PAWN));
+        const uint8_t mask  = uint8_t(0x3u << shift);
+        const uint8_t val   = uint8_t((c > 2 ? 2 : c) << shift);
+        data                = uint8_t((data & ~mask) | val);
+    }
+
+    // Increment up to 2
+    constexpr void inc(PieceType pt) {
+        const uint8_t c = count(pt);
+        if (c < 2) set_count(pt, uint8_t(c + 1));
+    }
+
+    // Decrement down to 0
+    constexpr void dec(PieceType pt) {
+        const uint8_t c = count(pt);
+        if (c > 0) set_count(pt, uint8_t(c - 1));
+    }
+
+    // Render pocket as concatenated piece codes in order P,H,F,W; color selects case
+    inline std::string to_string(Color c) const {
+        std::string s;
+        const char  codesUpper[4] = {'P', 'H', 'F', 'W'};
+        const char  codesLower[4] = {'p', 'h', 'f', 'w'};
+        const char* codes         = (c == WHITE ? codesUpper : codesLower);
+        for (PieceType pt = PAWN; pt <= WAZIR; ++pt) {
+            for (int k = 0, n = count(pt); k < n; ++k) s.push_back(codes[pt - PAWN]);
+        }
+        return s;
+    }
+
+   protected:
+    uint8_t data;
+};
 
 // Based on a congruential pseudo-random number generator
 constexpr Key make_key(uint64_t seed) {
@@ -253,12 +294,14 @@ class Move {
     // Promotion target: valid only if type_of() == PROMOTION.
     // Decodes bits 12..13 with HORSE as base.
     constexpr PieceType promotion_type() const {
+        assert(type_of() == PROMOTION);
         return PieceType(((data >> 12) & 0x3) + std::uint16_t(HORSE));
     }
 
     // Drop piece: valid only if type_of() == DROP.
     // Decodes bits 12..13 with PAWN as base.
     constexpr PieceType drop_piece() const {
+        assert(type_of() == DROP);
         return PieceType(((data >> 12) & 0x3) + std::uint16_t(PAWN));
     }
 

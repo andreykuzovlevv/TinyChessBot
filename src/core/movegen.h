@@ -38,6 +38,11 @@ struct MoveList {
     size_t      size() const { return last - moveList; }
     bool        contains(Move move) const { return std::find(begin(), end(), move) != end(); }
 
+    const Move& operator[](size_t i) const {
+        assert(i < size());
+        return moveList[i];
+    }
+
    private:
     Move moveList[MAX_MOVES], *last;
 };

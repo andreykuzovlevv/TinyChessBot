@@ -49,8 +49,19 @@ int main() {
 
     pos.set(fen, &si);
 
+    std::cout << pos;
+
+    StateInfo newSt;
+
+    Move m = *MoveList<LEGAL>(pos).begin();
+
+    printf("Move: %s\n", to_string(m).c_str());
+
+    pos.do_move(m, newSt, false);
+
+    std::cout << pos;
+
     for (Move m : MoveList<LEGAL>(pos)) {
         std::cout << m << '\n';
     }
-    std::cout << pos;
 }
