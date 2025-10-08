@@ -127,6 +127,7 @@ class Position {
     void put_piece(Piece pc, Square s);
     void remove_piece(Square s);
     void pocket_add_captured(PieceType captured, Color c);
+    void pocket_remove(PieceType placed, Color c);
 
    private:
     // Initialization helpers (used while setting up a position)
@@ -161,7 +162,13 @@ inline void Position::track_promoted_pawn(Square s) { promotedPawns |= s; }
 
 inline void Position::clear_promoted(Square s) { promotedPawns ^= s; }
 
-inline Piece Position::moved_piece(Move m) const { return piece_on(m.from_sq()); }
+inline void Position::pocket_add_captured(PieceType captured, Color c) { pockets[c].inc(captured); }
+
+inline void Position::pocket_remove(PieceType placed, Color c) { pockets[c].dec(placed); }
+
+inline Piece Position::moved_piece(Move m) const {
+    return m.type_of() != DROP ? piece_on(m.from_sq()) : make_piece(sideToMove, m.drop_piece());
+}
 
 inline const Pocket& Position::pocket(Color c) const { return pockets[c]; }
 

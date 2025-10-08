@@ -264,9 +264,9 @@ void Position::set_check_info() const {
     Square ksq = square<KING>(~sideToMove);
 
     st->checkSquares[PAWN]  = attacks_bb<PAWN>(ksq, ~sideToMove);
-    st->checkSquares[HORSE] = attacks_bb<HORSE>(ksq);
-    st->checkSquares[FERZ]  = attacks_bb<FERZ>(ksq, pieces());
-    st->checkSquares[WAZIR] = attacks_bb<WAZIR>(ksq, pieces());
+    st->checkSquares[HORSE] = attacks_bb<HORSE>(ksq, pieces());
+    st->checkSquares[FERZ]  = attacks_bb<FERZ>(ksq);
+    st->checkSquares[WAZIR] = attacks_bb<WAZIR>(ksq);
     st->checkSquares[KING]  = 0;
 }
 
@@ -409,7 +409,9 @@ bool Position::gives_check(Move m) const {
             return attacks_bb(m.promotion_type(), to, pieces() ^ from) & pieces(~sideToMove, KING);
 
         case DROP:
-            return attacks_bb(m.drop_piece(), to, pieces()) & pieces(~sideToMove, KING);
+            return m.drop_piece() == PAWN
+                       ? attacks_bb<PAWN>(to, sideToMove) & pieces(~sideToMove, KING)
+                       : attacks_bb(m.drop_piece(), to, pieces()) & pieces(~sideToMove, KING);
     }
 }
 
@@ -421,6 +423,8 @@ bool Position::gives_check(Move m) const {
 void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     assert(m.is_ok());
     assert(&newSt != st);
+
+    printf("%s is the move: do_move", to_string(m).c_str());
 
     Key k = st->key ^ Zobrist::side;
 
@@ -439,15 +443,16 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     Color  them     = ~us;
     Square from     = m.from_sq();
     Square to       = m.to_sq();
-    Piece  pc       = piece_on(from);
+    Piece  pc       = m.type_of() != DROP ? piece_on(from) : make_piece(sideToMove, m.drop_piece());
     Piece  captured = piece_on(to);
 
-    printf("Moving from %s to %s, with a %d Piece", square_string(from).c_str(),
+    printf("Moving from %s to %s, with a %d Piece\n", square_string(from).c_str(),
            square_string(to).c_str(), pc);
 
     assert(color_of(pc) == us);
     assert(captured == NO_PIECE || color_of(captured) == them);
     assert(type_of(captured) != KING);
+    printf("hello!!!\n");
 
     if (captured) {
         // Add piece to pocket
@@ -469,7 +474,13 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     // Update hash key
     k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
 
-    move_piece(from, to);
+    // If drop just put the piece
+    if (m.type_of() != DROP) {
+        move_piece(from, to);
+    } else {
+        put_piece(pc, to);
+        pocket_remove(m.drop_piece(), sideToMove);
+    }
 
     // If the moving piece is a pawn do some special extra work
     if (type_of(pc) == PAWN) {
@@ -494,6 +505,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     st->capturedPiece = captured;
 
     // Calculate checkers bitboard (if move gives check)
+    printf(givesCheck ? "gives check TRUE!!!\n" : "gives check not true, not updating checkers\n");
     st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
 
     sideToMove = ~sideToMove;

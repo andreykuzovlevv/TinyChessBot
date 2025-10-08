@@ -193,8 +193,6 @@ constexpr Rank relative_rank(Color c, Square s) { return relative_rank(c, rank_o
 
 constexpr Direction pawn_push(Color c) { return c == WHITE ? NORTH : SOUTH; }
 
-enum MoveType { NORMAL, PROMOTION = 1 << 14, DROP = 2 << 14 };
-
 class Pocket {
    public:
     constexpr Pocket() : data(0) {}
@@ -245,6 +243,8 @@ class Pocket {
 constexpr Key make_key(uint64_t seed) {
     return seed * 6364136223846793005ULL + 1442695040888963407ULL;
 }
+
+enum MoveType { NORMAL, PROMOTION = 1 << 14, DROP = 2 << 14 };
 
 // Stockfish-compatible 16-bit move container.
 class Move {

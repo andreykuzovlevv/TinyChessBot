@@ -65,6 +65,7 @@ int main() {
         // do move (forward-only; no undo)
         states.emplace_back();  // Create new StateInfo in container
         Move m = moves[idx];
+
         pos.do_move(m, states.back());  // Pass reference to the new StateInfo
     }
     return 0;

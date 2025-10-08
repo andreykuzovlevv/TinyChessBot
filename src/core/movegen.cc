@@ -135,6 +135,33 @@ Move* generate_all(const Position& pos, Move* moveList) {
         moveList = generate_moves<Us, HORSE>(pos, moveList, target);
         moveList = generate_moves<Us, FERZ>(pos, moveList, target);
         moveList = generate_moves<Us, WAZIR>(pos, moveList, target);
+
+        // Generate DROP moves from pocket
+        // - Can drop on any empty square
+        // - In EVASIONS, restrict to 'target' blocking set
+        // - Pawns cannot be dropped on last rank (promotion rank)
+        const Bitboard emptySquares = ~pos.pieces();
+        Bitboard       dropMask     = (Type == EVASIONS ? (target & emptySquares) : emptySquares);
+
+        const Pocket   pk           = pos.pocket(Us);
+
+        auto gen_drops_for = [&](PieceType pt, Bitboard mask) {
+            if (pk.count(pt) == 0) return;
+            Bitboard to_bb = mask;
+            while (to_bb) {
+                Square to = pop_lsb(to_bb);
+                *moveList++ = Move::make<DROP>(to, to, pt);
+            }
+        };
+
+        // Pawns: exclude last rank
+        Bitboard pawnMask = dropMask & (Us == WHITE ? ~Rank4BB : ~Rank1BB);
+        gen_drops_for(PAWN, pawnMask);
+
+        // Other pieces: HORSE, FERZ, WAZIR
+        gen_drops_for(HORSE, dropMask);
+        gen_drops_for(FERZ, dropMask);
+        gen_drops_for(WAZIR, dropMask);
     }
 
     Bitboard b = attacks_bb<KING>(ksq) & (Type == EVASIONS ? ~pos.pieces(Us) : target);
