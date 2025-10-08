@@ -25,6 +25,7 @@ namespace Zobrist {
 
 Key psq[PIECE_NB][SQUARE_NB];
 Key side;
+Key pocket[COLOR_NB][PIECE_TYPE_NB][3];  // [color][pieceType][count 0,1,2]
 }  // namespace Zobrist
 
 namespace {
@@ -93,6 +94,11 @@ void Position::init() {
     std::fill_n(Zobrist::psq[B_PAWN] + SQ_A1, 4, 0);
 
     Zobrist::side = rng.rand<Key>();
+
+    // Initialize pocket Zobrist keys
+    for (Color c = WHITE; c <= BLACK; ++c)
+        for (PieceType pt = PAWN; pt <= WAZIR; ++pt)
+            for (int count = 0; count < 3; ++count) Zobrist::pocket[c][pt][count] = rng.rand<Key>();
 
     // Prepare the cuckoo tables
     cuckoo.fill(0);
@@ -172,6 +178,34 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
         }
     }
 
+    // 1.5. Pocket pieces (optional, format: [black_pocket] [white_pocket])
+    // Skip whitespace and check for pocket info
+    while (ss.peek() == ' ') ss.ignore();
+    if (ss.peek() == '[') {
+        // Parse black pocket
+        ss.ignore();  // skip '['
+        while (ss >> token && token != ']') {
+            if (token >= 'a' && token <= 'z') {
+                // Convert lowercase to piece type and add to black pocket
+                PieceType pt = PieceType(token - 'a' + PAWN);
+                if (pt >= PAWN && pt <= WAZIR) pockets[BLACK].inc(pt);
+            }
+        }
+
+        // Parse white pocket
+        while (ss.peek() == ' ') ss.ignore();
+        if (ss.peek() == '[') {
+            ss.ignore();  // skip '['
+            while (ss >> token && token != ']') {
+                if (token >= 'A' && token <= 'Z') {
+                    // Convert uppercase to piece type and add to white pocket
+                    PieceType pt = PieceType(token - 'A' + PAWN);
+                    if (pt >= PAWN && pt <= WAZIR) pockets[WHITE].inc(pt);
+                }
+            }
+        }
+    }
+
     // 2. Active color
     ss >> token;
     sideToMove = (token == 'w' ? WHITE : BLACK);
@@ -206,6 +240,13 @@ string Position::fen() const {
         }
 
         if (r > RANK_1) ss << '/';
+    }
+
+    // Add pocket information if not empty
+    std::string blackPocket = pockets[BLACK].to_string(BLACK);
+    std::string whitePocket = pockets[WHITE].to_string(WHITE);
+    if (!blackPocket.empty() || !whitePocket.empty()) {
+        ss << " [" << blackPocket << "] [" << whitePocket << "]";
     }
 
     ss << (sideToMove == WHITE ? " w " : " b ");
@@ -243,6 +284,11 @@ void Position::set_state() const {
         Piece  pc = piece_on(s);
         st->key ^= Zobrist::psq[pc][s];
     }
+
+    // Add pocket contents to hash
+    for (Color c = WHITE; c <= BLACK; ++c)
+        for (PieceType pt = PAWN; pt <= WAZIR; ++pt)
+            st->key ^= Zobrist::pocket[c][pt][pockets[c].count(pt)];
 
     if (sideToMove == BLACK) st->key ^= Zobrist::side;
 }
@@ -404,8 +450,19 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     assert(type_of(captured) != KING);
 
     if (captured) {
+        // Add piece to pocket
+        // Check if captured piece is a promoted pawn
+        if (is_promoted_pawn(to)) {
+            pocket_add_captured(PAWN, us);
+            clear_promoted(to);
+
+        } else {
+            pocket_add_captured(type_of(captured), us);
+        }
+
         // Update board and piece lists
         remove_piece(to);
+
         k ^= Zobrist::psq[captured][to];
     }
 
@@ -425,6 +482,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
 
             remove_piece(to);
             put_piece(promotion, to);
+            track_promoted_pawn(to);
 
             // Update hash keys
             // Zobrist::psq[pc][to] is zero, so we don't need to clear it

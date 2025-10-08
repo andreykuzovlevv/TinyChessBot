@@ -73,7 +73,7 @@ class Position {
     template <typename... PieceTypes>
     Bitboard pieces(Color c, PieceTypes... pts) const;
 
-    Pocket pocket(Color c) const;
+    const Pocket& pocket(Color c) const;
 
     inline Piece piece_on(Square s) const {
         assert(is_ok(s));
@@ -126,6 +126,7 @@ class Position {
 
     void put_piece(Piece pc, Square s);
     void remove_piece(Square s);
+    void pocket_add_captured(PieceType captured, Color c);
 
    private:
     // Initialization helpers (used while setting up a position)
@@ -134,6 +135,9 @@ class Position {
 
     // Other helpers
     void move_piece(Square from, Square to);
+    bool is_promoted_pawn(Square s) const;
+    void track_promoted_pawn(Square s);
+    void clear_promoted(Square s);
 
     // Data members
     Piece      board[SQUARE_NB];  // mailbox
@@ -142,6 +146,7 @@ class Position {
     int        pieceCount[PIECE_NB];
     Color      sideToMove;
     Pocket     pockets[COLOR_NB];
+    Bitboard   promotedPawns;  // Bitboard of all promoted pawns
     StateInfo* st;
     int        gamePly;
 };
@@ -150,9 +155,15 @@ std::ostream& operator<<(std::ostream& os, const Position& pos);
 
 inline Key Position::key() const { return st->key; }
 
+inline bool Position::is_promoted_pawn(Square s) const { return promotedPawns & square_bb(s); }
+
+inline void Position::track_promoted_pawn(Square s) { promotedPawns |= s; }
+
+inline void Position::clear_promoted(Square s) { promotedPawns ^= s; }
+
 inline Piece Position::moved_piece(Move m) const { return piece_on(m.from_sq()); }
 
-inline Pocket Position::pocket(Color c) const { return pockets[c]; }
+inline const Pocket& Position::pocket(Color c) const { return pockets[c]; }
 
 inline Bitboard Position::pieces() const { return byTypeBB[ALL_PIECES]; }
 
@@ -215,6 +226,9 @@ inline void Position::move_piece(Square from, Square to) {
     byTypeBB[ALL_PIECES] ^= fromTo;
     byTypeBB[type_of(pc)] ^= fromTo;
     byColorBB[color_of(pc)] ^= fromTo;
+    // carry the “promoted pawn” tag with the piece
+    if (promotedPawns & from)     // was this square tagged?
+        promotedPawns ^= fromTo;  // toggle off 'from', toggle on 'to'
     board[from] = NO_PIECE;
     board[to]   = pc;
 }
