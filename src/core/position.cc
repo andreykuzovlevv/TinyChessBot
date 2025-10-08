@@ -60,12 +60,12 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     }
 
     os << "   a   b   c   d\n"
-       << "+[" << pos.pocket(WHITE).to_string(WHITE) << "]+\n"
-       << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
-       << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: [";
+       << "+[" << pos.pocket(WHITE).to_string(WHITE) << "]+\n";
+    //    << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase << std::setfill('0')
+    //    << std::setw(16) << pos.key() << std::setfill(' ') << std::dec << "\nCheckers: [";
 
-    for (Bitboard b = pos.checkers(); b;) os << square_string(pop_lsb(b)) << " ";
-    os << "]\n\n";
+    // for (Bitboard b = pos.checkers(); b;) os << square_string(pop_lsb(b));
+    // os << "]\n\n";
 
     return os;
 }
@@ -263,8 +263,24 @@ void Position::set_check_info() const {
 
     Square ksq = square<KING>(~sideToMove);
 
-    st->checkSquares[PAWN]  = attacks_bb<PAWN>(ksq, ~sideToMove);
-    st->checkSquares[HORSE] = attacks_bb<HORSE>(ksq, pieces());
+    st->checkSquares[PAWN] = attacks_bb<PAWN>(ksq, ~sideToMove);
+
+    // For HORSE, squares that give check depend on the occupancy of the leg
+    // adjacent to the HORSE origin, not the king square. Build reverse-attacker
+    // set by filtering pseudo-origins with an empty leg square in current occupancy.
+    {
+        Bitboard result     = 0;
+        Bitboard candidates = attacks_bb<HORSE>(ksq);  // pseudo origins around king
+        Bitboard occ        = pieces();
+
+        while (candidates) {
+            Square   origin = pop_lsb(candidates);
+            Bitboard leg    = horse_leg_bb(origin, ksq);
+            if (!(occ & leg)) result |= square_bb(origin);
+        }
+
+        st->checkSquares[HORSE] = result;
+    }
     st->checkSquares[FERZ]  = attacks_bb<FERZ>(ksq);
     st->checkSquares[WAZIR] = attacks_bb<WAZIR>(ksq);
     st->checkSquares[KING]  = 0;
@@ -296,46 +312,54 @@ void Position::set_state() const {
 // Computes a bitboard of all pieces which attack a given square.
 // Slider attacks use the occupied bitboard to indicate occupancy.
 Bitboard Position::attackers_to(Square s, Bitboard occupied) const {
+    // HORSE needs special reverse handling: whether a HORSE on origin attacks s
+    // depends on the occupancy of its leg adjacent to the origin square.
+    Bitboard horseAttackers = 0;
+    {
+        Bitboard candidates = attacks_bb<HORSE>(s);  // pseudo origins around s
+        candidates &= pieces(HORSE);
+
+        while (candidates) {
+            Square origin = pop_lsb(candidates);
+            if (!(occupied & horse_leg_bb(origin, s))) horseAttackers |= square_bb(origin);
+        }
+    }
+
     return (attacks_bb<FERZ>(s) & pieces(FERZ)) | (attacks_bb<WAZIR>(s) & pieces(WAZIR)) |
            (attacks_bb<PAWN>(s, BLACK) & pieces(WHITE, PAWN)) |
-           (attacks_bb<PAWN>(s, WHITE) & pieces(BLACK, PAWN)) |
-           (attacks_bb<HORSE>(s, occupied) & pieces(HORSE)) | (attacks_bb<KING>(s) & pieces(KING));
+           (attacks_bb<PAWN>(s, WHITE) & pieces(BLACK, PAWN)) | horseAttackers |
+           (attacks_bb<KING>(s) & pieces(KING));
 }
 
 bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
     // Pawns: squares from which a pawn of color c would attack s
     if (attacks_bb<PAWN>(s, ~c) & pieces(c, PAWN)) {
-        printf("PAWN attacks\n");
         return true;
     }
 
-    // Horse (xiangqi): leg-blocked; needs occupancy
-    if (attacks_bb<HORSE>(s, occupied) & pieces(c, HORSE)) {
-        printf("HORSE attacks\n");
-        return true;
+    // Horse (xiangqi): reverse-origin with leg-block check against occupied
+    {
+        Bitboard candidates = attacks_bb<HORSE>(s) & pieces(c, HORSE);
+        while (candidates) {
+            Square origin = pop_lsb(candidates);
+            if (!(occupied & horse_leg_bb(origin, s))) {
+                return true;
+            }
+        }
     }
 
     // Ferz: diagonal king-step (no occupancy needed)
     if (attacks_bb<FERZ>(s) & pieces(c, FERZ)) {
-        printf("FERZ attacks\n");
         return true;
     }
 
     // Wazir: orthogonal king-step (no occupancy needed)
     if (attacks_bb<WAZIR>(s) & pieces(c, WAZIR)) {
-        printf("WAZIR attacks\n");
         return true;
     }
 
     // King: standard king steps (no occupancy needed)
     if (attacks_bb<KING>(s) & pieces(c, KING)) {
-        printf("  sq s:\n%s\n", Bitboards::pretty(square_bb(s)).c_str());
-        printf("  attacking piece:\n%s\n",
-               Bitboards::pretty(attacks_bb<KING>(s) & pieces(c, KING)).c_str());
-        printf("  all attacks on sq s for kings:\n%s\n",
-               Bitboards::pretty(attacks_bb<KING>(s)).c_str());
-
-        printf("KING attacks\n");
         return true;
     }
 
@@ -395,8 +419,13 @@ bool Position::gives_check(Move m) const {
     Square from = m.from_sq();
     Square to   = m.to_sq();
 
+    PieceType movedPieceType = m.type_of() != DROP ? type_of(piece_on(from)) : m.drop_piece();
+
+    printf("Squere where just moved piece needs to be to give check:\n%s\n",
+           Bitboards::pretty(check_squares(movedPieceType)).c_str());
+
     // Is there a direct check?
-    if (check_squares(type_of(piece_on(from))) & to) return true;
+    if (check_squares(movedPieceType) & to) return true;
 
     // Is there a discovered check?
     if (blockers_for_king(~sideToMove) & from) return true;
@@ -424,7 +453,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     assert(m.is_ok());
     assert(&newSt != st);
 
-    printf("%s is the move: do_move", to_string(m).c_str());
+    printf("%s is the move: do_move. ", to_string(m).c_str());
 
     Key k = st->key ^ Zobrist::side;
 
@@ -446,13 +475,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     Piece  pc       = m.type_of() != DROP ? piece_on(from) : make_piece(sideToMove, m.drop_piece());
     Piece  captured = piece_on(to);
 
-    printf("Moving from %s to %s, with a %d Piece\n", square_string(from).c_str(),
-           square_string(to).c_str(), pc);
-
     assert(color_of(pc) == us);
     assert(captured == NO_PIECE || color_of(captured) == them);
     assert(type_of(captured) != KING);
-    printf("hello!!!\n");
 
     if (captured) {
         // Add piece to pocket
@@ -505,7 +530,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     st->capturedPiece = captured;
 
     // Calculate checkers bitboard (if move gives check)
-    printf(givesCheck ? "gives check TRUE!!!\n" : "gives check not true, not updating checkers\n");
+    printf(givesCheck ? "Gives check TRUE!!!\n" : "gives check not true, not updating checkers\n");
     st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
 
     sideToMove = ~sideToMove;
@@ -609,8 +634,7 @@ bool Position::pos_is_ok() const {
 
     if (pieceCount[W_KING] != 1 || pieceCount[B_KING] != 1 ||
         attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove)) {
-        printf("Sq King in check: %d\n", square<KING>(~sideToMove));
-        printf("  King in check:\n%s\n",
+        printf("King in check:\n%s\n",
                Bitboards::pretty(square_bb(square<KING>(~sideToMove))).c_str());
 
         assert(0 && "pos_is_ok: Kings");

@@ -86,28 +86,50 @@ void Bitboards::init() {
         for (int step : {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST})
             PseudoAttacks[FERZ][s1] |= safe_destination(s1, step);
 
-        for (int step :
-             {NORTH + NORTH_WEST, NORTH + NORTH_EAST, EAST + NORTH_EAST, EAST + SOUTH_EAST,
-              SOUTH + SOUTH_EAST, SOUTH + SOUTH_WEST, WEST + SOUTH_WEST, WEST + NORTH_WEST})
-            PseudoAttacks[HORSE][s1] |= safe_destination(s1, step);
+        // Pseudo HORSE attacks will be rebuilt from composed two-step moves below
+        PseudoAttacks[HORSE][s1] = 0;
 
-        // Fill Horse Leg Squares and Attacks per each direction
+        // Fill Horse Leg Squares and Attacks per each direction using masked shifts
         for (const auto& item : LEG_DIRS) {
-            Square leg = Square(int(s1) + item.delta);
-            if (is_ok(leg)) {
-                HorseLegSquare[item.idx][s1] = leg;
-
-                // Generate horse attacks for this direction
-                // Horse moves: one step in leg direction, then one step diagonally
-                Direction legDir = item.delta;
-                for (Direction diagDir : {NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST}) {
-                    // Check if the diagonal direction is compatible with leg direction
-                    if (is_compatible_direction(legDir, diagDir)) {
-                        int step = legDir + diagDir;
-                        HorseAttacks[item.idx][s1] |= safe_destination(s1, step);
-                    }
-                }
+            Bitboard legBB = 0;
+            switch (item.idx) {
+                case DIR_N: legBB = shift<NORTH>(square_bb(s1)); break;
+                case DIR_E: legBB = shift<EAST>(square_bb(s1)); break;
+                case DIR_S: legBB = shift<SOUTH>(square_bb(s1)); break;
+                case DIR_W: legBB = shift<WEST>(square_bb(s1)); break;
+                default: break;
             }
+
+            if (!legBB) continue;  // offboard
+
+            Square legSq = lsb(legBB);
+            HorseLegSquare[item.idx][s1] = legSq;
+
+            // From the leg square, move diagonally away from the leg direction
+            Bitboard dests = 0;
+            switch (item.idx) {
+                case DIR_N:
+                    dests |= shift<NORTH_EAST>(legBB);
+                    dests |= shift<NORTH_WEST>(legBB);
+                    break;
+                case DIR_E:
+                    dests |= shift<NORTH_EAST>(legBB);
+                    dests |= shift<SOUTH_EAST>(legBB);
+                    break;
+                case DIR_S:
+                    dests |= shift<SOUTH_EAST>(legBB);
+                    dests |= shift<SOUTH_WEST>(legBB);
+                    break;
+                case DIR_W:
+                    dests |= shift<SOUTH_WEST>(legBB);
+                    dests |= shift<NORTH_WEST>(legBB);
+                    break;
+                default:
+                    break;
+            }
+
+            HorseAttacks[item.idx][s1] = dests;
+            PseudoAttacks[HORSE][s1] |= dests;
         }
     }
 }
