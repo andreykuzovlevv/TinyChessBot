@@ -98,11 +98,11 @@ inline constexpr Value piece_value(Piece p) {
 constexpr Value START_MATERIAL = PawnValue + HorseValue + FerzValue + WazirValue;
 constexpr Value EVAL_MAX       = (HorseValue + FerzValue + WazirValue + WazirValue) * 2;
 
-constexpr Value VALUE_MATE     = 1200;
+constexpr Value VALUE_MATE     = 2200;
 constexpr Value VALUE_ZERO     = 0;
 constexpr Value VALUE_DRAW     = 0;
-constexpr Value VALUE_NONE     = 1202;
-constexpr Value VALUE_INFINITE = 1201;
+constexpr Value VALUE_NONE     = 2202;
+constexpr Value VALUE_INFINITE = 2201;
 
 enum Square : int8_t {
     SQ_A1,
@@ -187,7 +187,11 @@ constexpr File file_of(Square s) { return File(s & 3); }
 
 constexpr Rank rank_of(Square s) { return Rank(s >> 2); }
 
-constexpr Rank relative_rank(Color c, Rank r) { return Rank(r ^ (c * 7)); }
+constexpr Rank relative_rank(Color c, Rank r) {
+    // For White: same rank.
+    // For Black: flipped vertically (0↔3, 1↔2)
+    return c == WHITE ? r : Rank((RANK_NB - 1) - int(r));
+}
 
 constexpr Rank relative_rank(Color c, Square s) { return relative_rank(c, rank_of(s)); }
 

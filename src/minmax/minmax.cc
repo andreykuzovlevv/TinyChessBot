@@ -7,17 +7,17 @@ namespace tiny {
 Value evaluate(const Position& pos) {
     // Board material
     Value diff = 0;
-    for (int sq = 0; sq < SQUARE_NB; ++sq) diff += piece_value(pos.board[sq]);
+    for (Square s = SQ_A1; s <= SQ_D4; ++s) diff += piece_value(pos.piece_on(s));
 
     // Pocket material (drops)
     // Only PAWN/HORSE/FERZ/WAZIR are used in pockets
-    for (int pt = PAWN; pt <= WAZIR; ++pt) {
-        diff += pos.pockets.p[WHITE][pt] * type_value(static_cast<PieceType>(pt));
-        diff -= pos.pockets.p[BLACK][pt] * type_value(static_cast<PieceType>(pt));
+    for (PieceType pt = PAWN; pt <= WAZIR; ++pt) {
+        diff += int(pos.pocket(WHITE).count(pt)) * type_value(pt);
+        diff -= int(pos.pocket(BLACK).count(pt)) * type_value(pt);
     }
 
     // Perspective: return score for side to move
-    if (pos.sideToMove == BLACK) diff = -diff;
+    if (pos.side_to_move() == BLACK) diff = -diff;
 
     return diff;
 }
@@ -34,7 +34,7 @@ Value negamax(Position& pos, int depth, int alpha, int beta, int ply) {
 
     // No legal moves: terminal
     if (moves.size() == 0) {
-        if (pos.in_check()) {
+        if (pos.checkers()) {
             // Checkmate: side to move loses
             return -VALUE_MATE + ply;  // prefer quicker mates against us
         } else {
@@ -72,7 +72,7 @@ SearchResult search_best_move(Position& pos, int depth) {
     // Handle immediate terminals at root
     if (moves.size() == 0) {
         int terminalScore =
-            pos.in_check() ? (-VALUE_MATE /* + ply=0 */) : (+VALUE_MATE /* - ply=0 */);
+            pos.checkers() ? (-VALUE_MATE /* + ply=0 */) : (+VALUE_MATE /* - ply=0 */);
         return {MOVE_NONE, terminalScore};
     }
     if (pos.is_draw(/*ply=*/0)) return {MOVE_NONE, VALUE_DRAW};
@@ -87,7 +87,7 @@ SearchResult search_best_move(Position& pos, int depth) {
         StateInfo st;
         pos.do_move(m, st);
 
-        int score = -negamax(pos, depth - 1, -beta, -alpha, /*ply=*/1);
+        int score = -negamax(pos, depth - 1, -beta, -alpha, 1);
 
         pos.undo_move(m);
 

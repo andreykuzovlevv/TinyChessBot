@@ -46,6 +46,7 @@ struct StateInfo {
     StateInfo* previous;
     Bitboard   blockersForKing[COLOR_NB];
     Bitboard   checkSquares[PIECE_TYPE_NB];
+    bool       capturedWasPromotedPawn;
     Piece      capturedPiece;
     int        repetition;
 };

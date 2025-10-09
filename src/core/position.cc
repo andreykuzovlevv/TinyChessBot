@@ -34,9 +34,9 @@ static constexpr Piece Pieces[] = {W_PAWN, W_HORSE, W_FERZ, W_WAZIR, W_KING,
                                    B_PAWN, B_HORSE, B_FERZ, B_WAZIR, B_KING};
 
 // Piece to character mapping for FEN input/output
-// Indices map to Piece enum: [0]=NO_PIECE, [1]=W_PAWN('P'), [2]=W_HORSE('U'),
+// Indices map to Piece enum: [0]=NO_PIECE, [1]=W_PAWN('P'), [2]=W_HORSE('H'),
 // [3]=W_FERZ('F'), [4]=W_WAZIR('W'), [5]=W_KING('K'), then lowercase for black.
-constexpr std::string_view PieceToChar = " PUFWK   pufwk  ";
+constexpr std::string_view PieceToChar = " PHFWK   phfwk  ";
 }  // namespace
 
 std::string square_string(Square s) {
@@ -421,9 +421,6 @@ bool Position::gives_check(Move m) const {
 
     PieceType movedPieceType = m.type_of() != DROP ? type_of(piece_on(from)) : m.drop_piece();
 
-    printf("Squere where just moved piece needs to be to give check:\n%s\n",
-           Bitboards::pretty(check_squares(movedPieceType)).c_str());
-
     // Is there a direct check?
     if (check_squares(movedPieceType) & to) return true;
 
@@ -453,8 +450,6 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     assert(m.is_ok());
     assert(&newSt != st);
 
-    printf("%s is the move: do_move. ", to_string(m).c_str());
-
     Key k = st->key ^ Zobrist::side;
 
     // Copy some fields of the old state to our new StateInfo object except the
@@ -482,7 +477,8 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     if (captured) {
         // Add piece to pocket
         // Check if captured piece is a promoted pawn
-        if (is_promoted_pawn(to)) {
+        st->capturedWasPromotedPawn = is_promoted_pawn(to);
+        if (st->capturedWasPromotedPawn) {
             pocket_add_captured(PAWN, us);
             clear_promoted(to);
 
@@ -496,15 +492,22 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
         k ^= Zobrist::psq[captured][to];
     }
 
-    // Update hash key
-    k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
+    // Update hash key for board piece movement
+    if (m.type_of() != DROP) k ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
 
     // If drop just put the piece
     if (m.type_of() != DROP) {
         move_piece(from, to);
     } else {
         put_piece(pc, to);
-        pocket_remove(m.drop_piece(), sideToMove);
+        // Update pocket and hash for drop: decrement pocket count
+        PieceType dpt = m.drop_piece();
+        PieceType pt  = dpt;
+        int       cnt = pockets[us].count(pt);
+        // Toggle out previous count, then toggle in new count-1
+        k ^= Zobrist::pocket[us][pt][cnt];
+        pocket_remove(dpt, us);
+        k ^= Zobrist::pocket[us][pt][cnt - 1];
     }
 
     // If the moving piece is a pawn do some special extra work
@@ -520,9 +523,20 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
             put_piece(promotion, to);
             track_promoted_pawn(to);
 
+            // if (type_of(piece_on(to)) == PAWN) {
+            //     printf("\n\n\nPROMOTED TO PAWN!!!!\n\n\n");
+            // }
+
             // Update hash keys
             // Zobrist::psq[pc][to] is zero, so we don't need to clear it
             k ^= Zobrist::psq[promotion][to];
+            // Defensive: ensure board holds the promoted piece (not a pawn)
+            if (type_of(piece_on(to)) != promotionType) {
+                assert(0);
+                // Replace whatever ended up on 'to' with the correct promoted piece
+                remove_piece(to);
+                put_piece(promotion, to);
+            }
         }
     }
 
@@ -530,7 +544,6 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     st->capturedPiece = captured;
 
     // Calculate checkers bitboard (if move gives check)
-    printf(givesCheck ? "Gives check TRUE!!!\n" : "gives check not true, not updating checkers\n");
     st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
 
     sideToMove = ~sideToMove;
@@ -554,7 +567,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
             break;
         }
     }
-
+    assert(board[SQ_B4] != W_PAWN);
     assert(pos_is_ok());
     assert(from != SQ_NONE);
 }
@@ -564,15 +577,18 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
 void Position::undo_move(Move m) {
     assert(m.is_ok());
 
+    // Reverse side to move and ply first
     sideToMove = ~sideToMove;
 
     Color  us   = sideToMove;
+    Color  them = ~us;
     Square from = m.from_sq();
     Square to   = m.to_sq();
     Piece  pc   = piece_on(to);
 
     assert(type_of(st->capturedPiece) != KING);
 
+    // If it was a promotion, revert the promoted piece back to a pawn
     if (m.type_of() == PROMOTION) {
         assert(relative_rank(us, to) == RANK_4);
         assert(type_of(pc) == m.promotion_type());
@@ -581,17 +597,35 @@ void Position::undo_move(Move m) {
         remove_piece(to);
         pc = make_piece(us, PAWN);
         put_piece(pc, to);
+        clear_promoted(to);
     }
 
-    move_piece(to, from);  // Put the piece back at the source square
+    // If it was a drop, remove the dropped piece from the board and restore pocket
+    if (m.type_of() == DROP) {
+        PieceType dpt = m.drop_piece();
+        remove_piece(to);
+        // Restore pocket count and hash will be restored by state rewind
+        pocket_add_captured(dpt, us);  // add back to pocket
+    } else {
+        // Otherwise it was a board move: move the piece back
+        move_piece(to, from);
+    }
 
+    // If there was a capture, restore the captured piece on 'to'
     if (st->capturedPiece) {
-        Square capsq = to;
-
-        put_piece(st->capturedPiece, capsq);  // Restore the captured piece
+        PieceType restoredType;
+        if (st->capturedWasPromotedPawn) {
+            restoredType = PAWN;
+            track_promoted_pawn(to);  // re-tag the square as promoted pawn again
+        } else {
+            restoredType = type_of(st->capturedPiece);
+        }
+        put_piece(make_piece(them, type_of(st->capturedPiece)), to);
+        // Remove from pocket of side who captured in do_move (which is 'us' now)
+        pocket_remove(restoredType, us);
     }
 
-    // Finally point our state pointer back to the previous state
+    // Restore previous state pointer and ply
     st = st->previous;
     --gamePly;
 
