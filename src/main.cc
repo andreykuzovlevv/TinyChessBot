@@ -25,8 +25,26 @@ int main() {
     states.emplace_back();  // Create first StateInfo
     pos.set(fen, &states.back());
 
+    // Select side to play
+    Color humanSide = WHITE;
+    while (true) {
+        std::cout << "Choose your side ('w' for White, 'b' for Black): " << std::flush;
+        std::string sideIn;
+        if (!std::getline(std::cin, sideIn)) return 0;
+        if (!sideIn.empty() && (sideIn[0] == 'q' || sideIn[0] == 'Q')) return 0;
+        if (!sideIn.empty() && (sideIn[0] == 'w' || sideIn[0] == 'W')) {
+            humanSide = WHITE;
+            break;
+        }
+        if (!sideIn.empty() && (sideIn[0] == 'b' || sideIn[0] == 'B')) {
+            humanSide = BLACK;
+            break;
+        }
+        std::cout << "Invalid input. Enter 'w' or 'b'.\n";
+    }
+
     // Configure search depth for AI (Black)
-    const int searchDepth = 12;
+    const int searchDepth = 9;
 
     while (true) {
         std::cout << pos;
@@ -46,7 +64,7 @@ int main() {
             break;
         }
 
-        if (pos.side_to_move() == WHITE) {
+        if (pos.side_to_move() == humanSide) {
             // Human (White) input: choose a move by index
             std::cout << "Legal moves:\n";
             for (int i = 0; i < rootMoves.size(); ++i)
