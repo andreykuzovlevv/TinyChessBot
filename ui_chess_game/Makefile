@@ -5,11 +5,11 @@ TARGET  = $(OUTDIR)/$(PROJECT).exe
 
 CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall
-INCDIRS  = -Iinclude -Iinclude/imgui -Iinclude/SDL3
+INCDIRS  = -Iinclude -Iinclude/imgui -Iinclude/SDL3 -I../src -Iinclude/SDL3_image
 LIBDIRS  = -Llib
-LIBS     = -lSDL3
+LIBS     = -lSDL3 -lSDL3_image
 
-SRCS = $(wildcard src/*.cpp) $(wildcard imgui/*.cpp)
+SRCS = $(wildcard src/*.cpp) $(wildcard imgui/*.cpp) ../src/core/position.cc ../src/core/bitboard.cc ../src/core/movegen.cc ../src/minmax/minmax.cc
 OBJS = $(SRCS:.cpp=.o)
 
 .PHONY: default all clean
@@ -31,4 +31,4 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(INCDIRS) -c $< -o $@
 
 clean:
-	-rm -f src/*.o imgui/*.o $(TARGET)
+	-rm -f src/*.o imgui/*.o ../src/core/*.o ../src/minmax/*.o $(TARGET)

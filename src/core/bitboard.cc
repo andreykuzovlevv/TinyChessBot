@@ -27,22 +27,6 @@ Bitboard safe_destination(Square s, int step) {
     return is_ok(to) && distance(s, to) <= 2 ? square_bb(to) : Bitboard(0);
 }
 
-// Check if a diagonal direction is compatible with a leg direction for horse moves
-bool is_compatible_direction(Direction legDir, Direction diagDir) {
-    // For each leg direction, only certain diagonal directions are valid
-    switch (legDir) {
-        case NORTH:
-            return diagDir == NORTH_EAST || diagDir == NORTH_WEST;
-        case EAST:
-            return diagDir == NORTH_EAST || diagDir == SOUTH_EAST;
-        case SOUTH:
-            return diagDir == SOUTH_EAST || diagDir == SOUTH_WEST;
-        case WEST:
-            return diagDir == NORTH_WEST || diagDir == SOUTH_WEST;
-        default:
-            return false;
-    }
-}
 }  // namespace
 
 // Returns an ASCII representation of a bitboard suitable

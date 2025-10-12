@@ -153,13 +153,13 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
       incremented after Black's move.
 */
 
-    unsigned char      col, row, token;
+    unsigned char      token;
     size_t             idx;
     Square             sq = SQ_A4;
     std::istringstream ss(fenStr);
 
-    std::memset(this, 0, sizeof(Position));
-    std::memset(si, 0, sizeof(StateInfo));
+    *this = Position();
+    *si = StateInfo();
     st = si;
 
     ss >> std::noskipws;
@@ -438,6 +438,9 @@ bool Position::gives_check(Move m) const {
             return m.drop_piece() == PAWN
                        ? attacks_bb<PAWN>(to, sideToMove) & pieces(~sideToMove, KING)
                        : attacks_bb(m.drop_piece(), to, pieces()) & pieces(~sideToMove, KING);
+
+        default:
+            return false;
     }
 }
 
