@@ -73,7 +73,7 @@ struct UIConf {
 static inline bool is_own_piece(const Position& pos, Square s) {
     Piece pc = pos.piece_on(s);
     if (pc == NO_PIECE) return false;
-    Color c = (pc >= B_PAWN ? BLACK : WHITE);
+    Color c = color_of(pc);
     return c == pos.side_to_move();
 }
 
@@ -183,6 +183,7 @@ typedef struct {
     // Engine
     std::deque<StateInfo> states;
     Position              pos;
+    std::vector<Move>     legalMoves;
     Color                 humanSide = WHITE;
 
     // Game flow
@@ -303,10 +304,9 @@ static std::vector<Move> filter_moves_from(const Position& pos, Square from) {
     return out;
 }
 
-static std::vector<Move> filter_moves_from_to(const Position& pos, Square from, Square to) {
-    std::vector<Move> ms = legal_moves(pos);
+static std::vector<Move> filter_moves_from_to(AppState* as, Square from, Square to) {
     std::vector<Move> out;
-    for (auto m : ms)
+    for (auto m : as->legalMoves)
         if (m.from_sq() == from && m.to_sq() == to) out.push_back(m);
     return out;
 }
@@ -385,11 +385,7 @@ static void draw_circle(SDL_Renderer* r, const SDL_FPoint& c, float radius, Uint
 }
 
 static void draw_board(AppState* as) {
-    SDL_Renderer*    r = as->renderer;
-    const SDL_FRect& B = as->ui.boardRect;
-    draw_rect(r, B, 28, 28, 28, 255);
-
-    const int q = as->ui.squarePx;
+    SDL_Renderer* r = as->renderer;
     for (int rank = 0; rank < 4; ++rank) {
         for (int file = 0; file < 4; ++file) {
             Square    s    = make_square(File(file), Rank(rank));
@@ -573,24 +569,19 @@ static void draw_promotion_overlay(AppState* as) {
 static void draw_start_screen(AppState* as) {
     // Simple instruction blocks (no text rendering; use color hints)
     SDL_Renderer* r = as->renderer;
-    draw_rect(r, SDL_FRect{0, 0, (float)WINDOW_W, (float)WINDOW_H}, 16, 16, 28, 255);
+
+    float pieceSize = 500;
+
     // Two large buttons-ish areas:
-    SDL_FRect left{WINDOW_W * 0.15f, WINDOW_H * 0.25f, WINDOW_W * 0.3f, WINDOW_H * 0.5f};
-    SDL_FRect right{WINDOW_W * 0.55f, WINDOW_H * 0.25f, WINDOW_W * 0.3f, WINDOW_H * 0.5f};
-    draw_rect(r, left, 220, 220, 230, 255);
-    draw_rect(r, right, 30, 30, 40, 255);
-    draw_outline(r, left, 0, 0, 0, 255, 6.0f);
-    draw_outline(r, right, 255, 255, 255, 255, 6.0f);
+    SDL_FRect left{WINDOW_W / 2 - pieceSize, WINDOW_H / 2 - pieceSize / 2, pieceSize, pieceSize};
+    SDL_FRect right{WINDOW_W / 2, WINDOW_H / 2 - pieceSize / 2, pieceSize, pieceSize};
 
     // Icons: white king on left, black king on right (if textures)
     float pad = 40.0f;
     if (as->texturesLoaded) {
-        SDL_FRect lrc{left.x + pad, left.y + pad, left.w - 2 * pad, left.h - 2 * pad};
-        SDL_FRect rrc{right.x + pad, right.y + pad, right.w - 2 * pad, right.h - 2 * pad};
-        draw_piece_texture(r, as->textures[T_W_K], lrc);
-        draw_piece_texture(r, as->textures[T_B_K], rrc);
+        draw_piece_texture(r, as->textures[T_W_K], left);
+        draw_piece_texture(r, as->textures[T_B_K], right);
     }
-    // (Press W or B – no text rendering; rely on readme/comments)
 }
 
 // ---------- Game mechanics ----------
@@ -610,9 +601,13 @@ static void start_ai_thinking_if_needed(AppState* as) {
     if (as->ai.thinking) return;
 
     as->ai.thinking = true;
-    // Launch async search to keep UI responsive
-    as->ai.fut = std::async(std::launch::async, [&]() {
-        SearchResult res = search_best_move(as->pos, as->searchDepth);
+
+    // Snapshot everything the thread needs, _before_ launching it.
+    Position  snapshot = as->pos;          // deep enough for your engine (as you tested)
+    const int depth    = as->searchDepth;  // or as->searchDepth if you store it there
+
+    as->ai.fut = std::async(std::launch::async, [snapshot, depth]() mutable {
+        SearchResult res = search_best_move(snapshot, depth);
         return res;
     });
 }
@@ -624,7 +619,7 @@ static void maybe_finish_ai(AppState* as) {
         SearchResult res = as->ai.fut.get();
         as->ai.thinking  = false;
         if (res.bestMove != MOVE_NONE) {
-            apply_move_and_advance(as, res.bestMove);
+            apply_move_and_advance(as, res.bestMove);  // modifies as->pos on the main thread
         }
     }
 }
@@ -678,7 +673,6 @@ static bool click_in_pocket(AppState* as, float mx, float my, Color& pocketColor
 }
 
 static void handle_board_click(AppState* as, float mx, float my) {
-    if (as->phase != Phase::Playing) return;
     if (as->pos.side_to_move() != as->humanSide) return;  // wait for AI
 
     // First, promotion overlay?
@@ -764,7 +758,7 @@ static void handle_board_click(AppState* as, float mx, float my) {
     }
 
     // Have a source; attempt to move to clicked target
-    auto candidates = filter_moves_from_to(as->pos, *as->selectedSq, s);
+    auto candidates = filter_moves_from_to(as, *as->selectedSq, s);
     if (candidates.empty()) {
         // If clicked another own piece, switch selection
         if (is_own_piece(as->pos, s)) {
@@ -802,20 +796,25 @@ static void handle_board_click(AppState* as, float mx, float my) {
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_SetAppMetadata("TinyHouse variant of Chess game with AI", "1.0",
                             "com.example.tinyhouse")) {
+        printf("Failed to set app metadata\n");
         return SDL_APP_FAILURE;
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+        printf("Failed to initialize SDL: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    AppState* as = (AppState*)SDL_calloc(1, sizeof(AppState));
-    if (!as) return SDL_APP_FAILURE;
+    AppState* as = new AppState();
+    if (!as) {
+        printf("Failed to allocate AppState\n");
+        return SDL_APP_FAILURE;
+    }
     *appstate = as;
 
     if (!SDL_CreateWindowAndRenderer("TinyHouse Chess", WINDOW_W, WINDOW_H,
                                      SDL_WINDOW_ALWAYS_ON_TOP, &as->window, &as->renderer)) {
+        printf("Couldn't create window and renderer: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
     SDL_SetRenderLogicalPresentation(as->renderer, WINDOW_W, WINDOW_H,
@@ -827,7 +826,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     as->states.clear();
     as->states.emplace_back();
+
     as->pos.set(START_FEN, &as->states.back());
+    as->legalMoves = legal_moves(as->pos);
 
     load_all_textures(as);
 
@@ -835,6 +836,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     as->boardFlipped = false;
     as->humanSide    = WHITE;
     as->lastTicks    = SDL_GetTicks();
+
+    printf("SDL APP INIT PASSED\n");
 
     return SDL_APP_CONTINUE;
 }
@@ -850,7 +853,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
             float my = (float)event->button.y;
 
             if (as->phase == Phase::SideSelect) {
-                // No text/UI hit-testing; rely on keyboard W/B.
                 // But allow clicking left/right halves for convenience.
                 if (mx < WINDOW_W / 2) {
                     as->humanSide = WHITE;
@@ -890,6 +892,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     AppState* as = (AppState*)appstate;
 
+    // Render
+    SDL_SetRenderDrawColor(as->renderer, 25, 25, 25, 255);
+    SDL_RenderClear(as->renderer);
+
     // AI progression
     if (as->phase == Phase::Playing) {
         // Terminal check (constant time, tiny board)
@@ -904,18 +910,14 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         }
     }
 
-    // Render
-    SDL_SetRenderDrawColor(as->renderer, 22, 22, 30, 255);
-    SDL_RenderClear(as->renderer);
-
     if (as->phase == Phase::SideSelect) {
         draw_start_screen(as);
     } else {
         draw_board(as);
         draw_last_move(as);
         draw_check(as);
-        draw_pieces(as);
         draw_selection(as);
+        draw_pieces(as);
         draw_pockets(as);
 
         // Promotion overlay (if active)

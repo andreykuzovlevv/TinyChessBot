@@ -65,6 +65,7 @@
         "bitset": "cpp",
         "chrono": "cpp",
         "forward_list": "cpp",
-        "ratio": "cpp"
+        "ratio": "cpp",
+        "xtree": "cpp"
     }
 }
