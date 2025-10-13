@@ -129,7 +129,7 @@ typedef struct {
 
     // AI
     AsyncAI ai;
-    int     searchDepth = 9;
+    int     searchDepth = 3;
 
     // Rendering
     UIConf                           ui{};
@@ -513,48 +513,39 @@ static void draw_promotion_overlay(AppState* as) {
     if (!as->promo.visible) return;
     SDL_Renderer* r = as->renderer;
 
-    // Dim background
-    draw_rect(r, SDL_FRect{0, 0, (float)WINDOW_W, (float)WINDOW_H}, Colors::PromotionBackground);
+    // Full square rect
+    SDL_FRect sqRect = square_rect(as, as->promo.to);
 
-    // Panel at center: three options HORSE, FERZ, WAZIR
-    float     W = as->ui.squarePx * 3.2f;
-    float     H = as->ui.squarePx * 1.25f;
-    SDL_FRect panel{as->ui.boardRect.x + as->ui.boardRect.w / 2 - W / 2,
-                    as->ui.boardRect.y + as->ui.boardRect.h / 2 - H / 2, W, H};
-    draw_rect(r, panel, Colors::PromotionPanel);
-    draw_outline(r, panel, Colors::PromotionBorder, 4.0f);
+    // Semi-transparent dark overlay
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 180);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_RenderFillRect(r, &sqRect);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
 
-    // Layout three equal cells inside
-    float                    gap = 12.0f;
-    float                    cw  = (W - 4 * gap) / 3.0f;
-    float                    ch  = H - 2 * gap;
-    std::array<PieceType, 3> order{HORSE, FERZ, WAZIR};
+    const float                    halfW = sqRect.w * 0.5f;
+    const std::array<PieceType, 3> order = {HORSE, FERZ, WAZIR};
+
+    Color who = as->pos.side_to_move();
 
     for (int i = 0; i < 3; ++i) {
-        SDL_FRect rc{panel.x + gap + i * (cw + gap), panel.y + gap, cw, ch};
-        as->promo.rects[i] = rc;
+        SDL_FRect cell{};
+        if (i == 0) {
+            cell = {sqRect.x, sqRect.y, halfW, halfW};
+        }  // top-left
+        else if (i == 1) {
+            cell = {sqRect.x + halfW, sqRect.y, halfW, halfW};
+        }  // top-right
+        else {
+            cell = {sqRect.x, sqRect.y + halfW, halfW, halfW};
+        }  // bottom-left
 
-        // Does an option exist for this piece?
-        bool exists = false;
-        for (auto m : as->promo.options) {
-            if (m.type_of() == PROMOTION && m.promotion_type() == order[i]) {
-                exists = true;
-                break;
-            }
-        }
+        as->promo.rects[i] = cell;
 
-        // Draw
-        draw_rect(r, rc, exists ? Colors::PromotionOption : Colors::PromotionOptionDisabled);
-        Color  who = as->pos.side_to_move();  // promotion side equals mover
-        TexKey tk  = texkey_for_piece(who, order[i]);
-        if (exists && as->texturesLoaded && as->textures[tk])
-            draw_piece_texture(r, as->textures[tk], rc);
-        else if (exists)
-            draw_piece_fallback(r, who, order[i], rc);
-
-        draw_outline(r, rc,
-                     exists ? Colors::PromotionOptionBorder : Colors::PromotionOptionDisabledBorder,
-                     3.0f);
+        TexKey tk = texkey_for_piece(who, order[i]);
+        if (as->texturesLoaded && as->textures[tk])
+            draw_piece_texture(r, as->textures[tk], cell);
+        else
+            draw_piece_fallback(r, who, order[i], cell);
     }
 }
 
@@ -635,6 +626,7 @@ static void draw_right_panel(AppState* as) {
             SDL_RenderDebugText(r, tx / 1.5f, ty / 1.5f, "Draw by threefold repetition");
             SDL_SetRenderScale(r, 1.0f, 1.0f);
             ty += 22;
+
         } else {
             const char* res = (as->gameResult == GameResult::CheckMate) ? "Checkmate" : "Stalemate";
             const char* win = (as->winner == WHITE) ? "White" : "Black";
@@ -643,6 +635,9 @@ static void draw_right_panel(AppState* as) {
             SDL_SetRenderScale(r, 1.0f, 1.0f);
             ty += 22;
         }
+        // Small hints
+        ty += 6;
+        SDL_RenderDebugText(r, tx, ty, "[R] Restart");
 
     } else {
         // Side to move

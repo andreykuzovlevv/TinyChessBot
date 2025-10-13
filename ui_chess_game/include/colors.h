@@ -54,15 +54,6 @@ constexpr DrawColor LastMoveFrom   = DrawColor(76, 159, 237);
 constexpr DrawColor LastMoveTo     = DrawColor(76, 196, 237);
 constexpr DrawColor CheckHighlight = DrawColor(220, 30, 30, 60);
 
-// Promotion colors
-constexpr DrawColor PromotionBackground           = DrawColor(0, 0, 0, 100);
-constexpr DrawColor PromotionPanel                = DrawColor(20, 20, 20, 240);
-constexpr DrawColor PromotionBorder               = DrawColor(180, 180, 180);
-constexpr DrawColor PromotionOption               = DrawColor(60, 60, 60);
-constexpr DrawColor PromotionOptionBorder         = DrawColor(200, 200, 30);
-constexpr DrawColor PromotionOptionDisabled       = DrawColor(40, 40, 40);
-constexpr DrawColor PromotionOptionDisabledBorder = DrawColor(80, 80, 30);
-
 // AI thinking indicator
 constexpr DrawColor AIThinking = DrawColor(40, 40, 70, 200);
 
