@@ -152,8 +152,6 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
    6) Fullmove number. The number of the full move. It starts at 1, and is
       incremented after Black's move.
 */
-    printf("Setting the position..\n");
-
     unsigned char      token;
     size_t             idx;
     Square             sq = SQ_A4;
@@ -164,8 +162,6 @@ Position& Position::set(const string& fenStr, StateInfo* si) {
     st = si;
 
     ss >> std::noskipws;
-
-    printf("Setting the position..2\n");
 
     // 1. Piece placement
     while ((ss >> token) && !isspace(token)) {
@@ -293,7 +289,6 @@ void Position::set_check_info() const {
 // data that once computed is updated incrementally as moves are made.
 // The function is only used when a new position is set up
 void Position::set_state() const {
-    printf("Setting the state..\n");
     st->key        = 0;
     st->checkersBB = attackers_to(square<KING>(sideToMove)) & pieces(~sideToMove);
 

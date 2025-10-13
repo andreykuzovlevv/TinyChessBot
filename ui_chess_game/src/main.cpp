@@ -1,5 +1,6 @@
 
 #define SDL_MAIN_USE_CALLBACKS 1
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
@@ -17,12 +18,14 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../include/colors.h"
 #include "core/movegen.h"
 #include "core/position.h"
 #include "core/types.h"
 #include "minmax/minmax.h"
 
 using namespace tiny;
+using namespace Colors;
 
 // ---------- Config ----------
 #define WINDOW_W 1920
@@ -37,8 +40,7 @@ struct UIConf {
     int marginPx    = 24;
     int squarePx    = boardSizePx / 4;
 
-    // Pocket width = one square (same as square size)
-    int pocketWidth = squarePx;
+    int pocketWidth = boardSizePx / 8;
 
     // Compute total content width = pocket + margin + board
     int totalContentWidth = pocketWidth + marginPx + boardSizePx;
@@ -218,6 +220,8 @@ static SDL_Texture* load_texture(SDL_Renderer* r, const char* path) {
 
     SDL_asprintf(&svg_path, "%s%s", SDL_GetBasePath(),
                  path); /* allocate a string of the full file path */
+
+    // Load the texture
     texture = IMG_LoadTexture(r, svg_path);
     if (!texture) {
         SDL_Log("Couldn't create static texture: %s", SDL_GetError());
@@ -344,15 +348,15 @@ static bool is_terminal(const Position& pos, bool& isMate, Color& winner, bool& 
 }
 
 // ---------- Rendering ----------
-static void draw_rect(SDL_Renderer* r, const SDL_FRect& rc, Uint8 R, Uint8 G, Uint8 B, Uint8 A) {
-    SDL_SetRenderDrawColorFloat(r, R / 255.0f, G / 255.0f, B / 255.0f, A / 255.0f);
+static void draw_rect(SDL_Renderer* r, const SDL_FRect& rc, const DrawColor& color) {
+    color.set_sdl_color(r);
     SDL_RenderFillRect(r, &rc);
 }
 
-static void draw_outline(SDL_Renderer* r, const SDL_FRect& rc, Uint8 R, Uint8 G, Uint8 B, Uint8 A,
+static void draw_outline(SDL_Renderer* r, const SDL_FRect& rc, const DrawColor& color,
                          float thickness = 3.0f) {
     // Draw 4 thin rects as outline
-    SDL_SetRenderDrawColorFloat(r, R / 255.0f, G / 255.0f, B / 255.0f, A / 255.0f);
+    color.set_sdl_color(r);
     SDL_FRect t = rc;
     // top
     t.h = thickness;
@@ -371,17 +375,54 @@ static void draw_outline(SDL_Renderer* r, const SDL_FRect& rc, Uint8 R, Uint8 G,
     SDL_RenderFillRect(r, &t);
 }
 
-static void draw_circle(SDL_Renderer* r, const SDL_FPoint& c, float radius, Uint8 R, Uint8 G,
-                        Uint8 B, Uint8 A) {
-    SDL_SetRenderDrawColorFloat(r, R / 255.0f, G / 255.0f, B / 255.0f, A / 255.0f);
-    const int N = 40;
-    for (int i = 0; i < N; ++i) {
-        float      t0 = (float)i * 6.2831853f / N;
-        float      t1 = (float)(i + 1) * 6.2831853f / N;
-        SDL_FPoint p0{c.x + radius * cosf(t0), c.y + radius * sinf(t0)};
-        SDL_FPoint p1{c.x + radius * cosf(t1), c.y + radius * sinf(t1)};
-        SDL_RenderLine(r, p0.x, p0.y, p1.x, p1.y);
+// Filled disc
+static void draw_filled_circle(SDL_Renderer* r, const SDL_FPoint& c, float radius,
+                               const DrawColor& color) {
+    color.set_sdl_color(r);
+    const int yMax = (int)ceilf(radius);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    for (int iy = -yMax; iy <= yMax; ++iy) {
+        float dy = (float)iy;
+        float dx = sqrtf(std::max(0.0f, radius * radius - dy * dy));
+        float y  = c.y + dy;
+
+        // draw horizontal span
+        SDL_RenderLine(r, c.x - dx, y, c.x + dx, y);
     }
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+}
+
+// Ring with thickness (outer radius = radius, inner radius = radius - thickness)
+static void draw_ring(SDL_Renderer* r, const SDL_FPoint& c, float radius, float thickness,
+                      const DrawColor& color) {
+    if (thickness <= 0.0f) return;
+    color.set_sdl_color(r);
+    float     rOuter = radius;
+    float     rInner = std::max(0.0f, radius - thickness);
+    const int yMax   = (int)ceilf(rOuter);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    for (int iy = -yMax; iy <= yMax; ++iy) {
+        float dy = (float)iy;
+        float yo = rOuter * rOuter - dy * dy;
+        if (yo < 0.0f) continue;
+        float xo = sqrtf(yo);
+
+        float yi = rInner * rInner - dy * dy;
+        float xi = yi > 0.0f ? sqrtf(yi) : 0.0f;
+
+        float y = c.y + dy;
+        // left arc segment
+        SDL_RenderLine(r, c.x - xo, y, c.x - xi, y);
+        // right arc segment
+        SDL_RenderLine(r, c.x + xi, y, c.x + xo, y);
+    }
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+}
+
+static void draw_text(SDL_Renderer* r, const char* text, float x, float y, const DrawColor& color) {
+    // Use SDL_RenderDebugText for proper text rendering
+    color.set_sdl_color(r);
+    SDL_RenderDebugText(r, x, y, text);
 }
 
 static void draw_board(AppState* as) {
@@ -391,8 +432,7 @@ static void draw_board(AppState* as) {
             Square    s    = make_square(File(file), Rank(rank));
             SDL_FRect rc   = square_rect(as, s);
             bool      dark = ((file + rank) & 1);
-            Uint8     c    = dark ? 90 : 170;
-            draw_rect(r, rc, c, c, c, 255);
+            draw_rect(r, rc, dark ? Colors::BoardDark : Colors::BoardLight);
         }
     }
 }
@@ -400,10 +440,10 @@ static void draw_board(AppState* as) {
 static void draw_last_move(AppState* as) {
     SDL_Renderer* r = as->renderer;
     if (as->lastMove.from) {
-        draw_rect(r, square_rect(as, *as->lastMove.from), 255, 255, 0, 55);
+        draw_rect(r, square_rect(as, *as->lastMove.from), Colors::LastMoveFrom);
     }
     if (as->lastMove.to) {
-        draw_rect(r, square_rect(as, *as->lastMove.to), 0, 255, 0, 55);
+        draw_rect(r, square_rect(as, *as->lastMove.to), Colors::LastMoveTo);
     }
 }
 
@@ -411,7 +451,7 @@ static void draw_check(AppState* as) {
     // Highlight side-to-move king if in check
     if (as->pos.checkers() == 0) return;
     Square ksq = as->pos.square<KING>(as->pos.side_to_move());
-    draw_rect(as->renderer, square_rect(as, ksq), 220, 30, 30, 60);
+    draw_rect(as->renderer, square_rect(as, ksq), Colors::CheckHighlight);
 }
 
 static void draw_piece_texture(SDL_Renderer* r, SDL_Texture* tex, const SDL_FRect& dst) {
@@ -421,11 +461,9 @@ static void draw_piece_texture(SDL_Renderer* r, SDL_Texture* tex, const SDL_FRec
 
 static void draw_piece_fallback(SDL_Renderer* r, Color c, PieceType pt, const SDL_FRect& cell) {
     // Simple circle marker; different radii per type to distinguish.
-    float rad = std::min(cell.w, cell.h) * (0.35f + 0.05f * (pt - 1));
-    Uint8 R   = (c == WHITE ? 240 : 30);
-    Uint8 G   = (c == WHITE ? 240 : 30);
-    Uint8 B   = (c == WHITE ? 240 : 30);
-    draw_circle(r, SDL_FPoint{cell.x + cell.w / 2, cell.y + cell.h / 2}, rad, R, G, B, 255);
+    float     rad        = std::min(cell.w, cell.h) * (0.35f + 0.05f * (pt - 1));
+    DrawColor pieceColor = (c == WHITE ? DrawColor(240, 240, 240) : DrawColor(30, 30, 30));
+    draw_filled_circle(r, SDL_FPoint{cell.x + cell.w / 2, cell.y + cell.h / 2}, rad, pieceColor);
 }
 
 static void draw_pieces(AppState* as) {
@@ -451,18 +489,30 @@ static void draw_selection(AppState* as) {
 
     // Show selected square
     if (as->selectedSq) {
-        draw_outline(r, square_rect(as, *as->selectedSq), 40, 200, 255, 255, 5.0f);
+        draw_outline(r, square_rect(as, *as->selectedSq), Colors::SelectionOutline, 5.0f);
 
         // Show legal targets from that square
         auto ms = filter_moves_from(as->pos, *as->selectedSq);
         for (auto m : ms) {
             SDL_FRect rc = square_rect(as, m.to_sq());
-            // Overlay soft highlight (green for quiet, orange if capture)
+
+            SDL_FPoint center{rc.x + rc.w * 0.5f, rc.y + rc.h * 0.5f};
+
             bool isCapture = as->pos.piece_on(m.to_sq()) != NO_PIECE;
-            draw_rect(r, rc, isCapture ? 255 : 0, isCapture ? 160 : 200, 0, 60);
-            // Small dot at center
-            draw_circle(r, SDL_FPoint{rc.x + rc.w / 2, rc.y + rc.h / 2}, rc.w * 0.12f, 0, 0, 0,
-                        180);
+
+            // unified color; adjust if you keep separate palette for captures
+            const DrawColor hintColor = Colors::MoveHint;  // same color for both as requested
+
+            if (!isCapture) {
+                // small filled dot
+                float r = rc.h * 0.15f;  // tweak to taste
+                draw_filled_circle(as->renderer, center, r, hintColor);
+            } else {
+                // larger ring of same color
+                float rOuter    = rc.h * 0.35f;
+                float thickness = rc.h * 0.07f;
+                draw_ring(as->renderer, center, rOuter, thickness, hintColor);
+            }
         }
     }
 
@@ -471,9 +521,8 @@ static void draw_selection(AppState* as) {
         auto drops = filter_drop_moves(as->pos, *as->selectedDropPiece);
         for (auto m : drops) {
             SDL_FRect rc = square_rect(as, m.to_sq());
-            draw_rect(r, rc, 60, 200, 60, 60);
-            draw_circle(r, SDL_FPoint{rc.x + rc.w / 2, rc.y + rc.h / 2}, rc.w * 0.12f, 0, 0, 0,
-                        180);
+            draw_filled_circle(r, SDL_FPoint{rc.x + rc.w / 2, rc.y + rc.h / 2}, rc.w * 0.15f,
+                               Colors::MoveHint);
         }
     }
 }
@@ -481,42 +530,57 @@ static void draw_selection(AppState* as) {
 static void draw_pockets(AppState* as) {
     SDL_Renderer*    r = as->renderer;
     const SDL_FRect& U = as->ui.leftUIRect;
-    draw_rect(r, U, 24, 24, 40, 255);
 
-    // Two panels: top for side-to-move? Better: fixed — white pocket on bottom, black on top.
-    float     pad  = 12.0f;
-    float     cell = std::min((U.w - 2 * pad) / 4.0f, (U.h - 3 * pad) / 4.0f);  // 4 columns
-    float     tH   = cell * 2 + pad;  // each pocket two rows
-    SDL_FRect blackPanel{U.x + pad, U.y + pad, U.w - 2 * pad, tH};
-    SDL_FRect whitePanel{U.x + pad, U.y + U.h - pad - tH, U.w - 2 * pad, tH};
-    draw_rect(r, blackPanel, 35, 35, 60, 255);
-    draw_rect(r, whitePanel, 35, 35, 60, 255);
+    draw_rect(r, U, Colors::PocketBackground);
+    draw_outline(r, U, Colors::PocketBorder, 2.0f);
 
-    auto drawPocket = [&](Color c, const SDL_FRect& panel) {
-        // Render PAWN, HORSE, FERZ, WAZIR as up to 2 copies each (Pocket counters are 0..2)
-        std::array<PieceType, 4> order{PAWN, HORSE, FERZ, WAZIR};
-        float                    gap = cell * 0.2f;
-        for (int i = 0; i < 4; ++i) {
-            int cnt = as->pos.pocket(c).count(order[i]);
-            for (int k = 0; k < std::min(cnt, 2); ++k) {
-                SDL_FRect rc{panel.x + i * (cell + gap), panel.y + (k == 0 ? gap : gap * 2 + cell),
-                             cell, cell};
-                TexKey    tk = texkey_for_piece(c, order[i]);
-                if (as->texturesLoaded && as->textures[tk])
-                    draw_piece_texture(r, as->textures[tk], rc);
-                else
-                    draw_piece_fallback(r, c, order[i], rc);
+    const bool  flipped     = as->boardFlipped;
+    const Color bottomColor = flipped ? ~as->humanSide : as->humanSide;
+    const Color topColor    = ~bottomColor;
 
-                // If selected drop matches this slot, outline it
-                if (as->selectedDropPiece && *as->selectedDropPiece == order[i] &&
-                    c == as->pos.side_to_move())
-                    draw_outline(r, rc, 0, 255, 255, 255, 4.0f);
+    const int slotsPerSide = 4;  // PAWN..WAZIR
+
+    // Correct halves
+    SDL_FRect topArea{U.x, U.y, U.w, U.h / 2};
+    SDL_FRect bottomArea{U.x, U.y + U.h / 2, U.w, U.h / 2};
+
+    auto draw_side_stack = [&](Color side, const SDL_FRect& area) {
+        const float slotH = area.h / slotsPerSide;
+
+        for (PieceType pt = PAWN; pt <= WAZIR; ++pt) {
+            int count = as->pos.pocket(side).count(pt);
+            if (count <= 0) continue;
+
+            // Map enum to row index (assumes contiguous PAWN..WAZIR)
+            int row = static_cast<int>(pt) - static_cast<int>(PAWN);
+
+            SDL_FRect slotRect{area.x, area.y + row * slotH, area.w, slotH};
+
+            TexKey tk = texkey_for_piece(side, pt);
+            if (as->texturesLoaded && as->textures[tk]) {
+                draw_piece_texture(r, as->textures[tk], slotRect);
+            } else {
+                draw_piece_fallback(r, side, pt, slotRect);
+            }
+
+            if (count > 1) {
+                float countX = slotRect.x + slotRect.w - 12.0f;
+                float countY = slotRect.y + 8.0f;
+                draw_filled_circle(r, SDL_FPoint{countX, countY}, 8.0f, Colors::CountText);
+
+                char countStr[4];
+                snprintf(countStr, sizeof(countStr), "%d", count);
+                draw_text(r, countStr, countX, countY, Colors::PocketBackground);
+            }
+            // Show selected square
+            if (as->selectedDropPiece == pt) {
+                draw_outline(r, slotRect, Colors::SelectionOutline, 2.5f);
             }
         }
     };
 
-    drawPocket(BLACK, blackPanel);
-    drawPocket(WHITE, whitePanel);
+    draw_side_stack(topColor, topArea);
+    draw_side_stack(bottomColor, bottomArea);
 }
 
 static void draw_promotion_overlay(AppState* as) {
@@ -524,15 +588,15 @@ static void draw_promotion_overlay(AppState* as) {
     SDL_Renderer* r = as->renderer;
 
     // Dim background
-    draw_rect(r, SDL_FRect{0, 0, (float)WINDOW_W, (float)WINDOW_H}, 0, 0, 0, 100);
+    draw_rect(r, SDL_FRect{0, 0, (float)WINDOW_W, (float)WINDOW_H}, Colors::PromotionBackground);
 
     // Panel at center: three options HORSE, FERZ, WAZIR
     float     W = as->ui.squarePx * 3.2f;
     float     H = as->ui.squarePx * 1.25f;
     SDL_FRect panel{as->ui.boardRect.x + as->ui.boardRect.w / 2 - W / 2,
                     as->ui.boardRect.y + as->ui.boardRect.h / 2 - H / 2, W, H};
-    draw_rect(r, panel, 20, 20, 20, 240);
-    draw_outline(r, panel, 180, 180, 180, 255, 4.0f);
+    draw_rect(r, panel, Colors::PromotionPanel);
+    draw_outline(r, panel, Colors::PromotionBorder, 4.0f);
 
     // Layout three equal cells inside
     float                    gap = 12.0f;
@@ -554,7 +618,7 @@ static void draw_promotion_overlay(AppState* as) {
         }
 
         // Draw
-        draw_rect(r, rc, exists ? 60 : 40, exists ? 60 : 40, exists ? 60 : 40, 255);
+        draw_rect(r, rc, exists ? Colors::PromotionOption : Colors::PromotionOptionDisabled);
         Color  who = as->pos.side_to_move();  // promotion side equals mover
         TexKey tk  = texkey_for_piece(who, order[i]);
         if (exists && as->texturesLoaded && as->textures[tk])
@@ -562,25 +626,62 @@ static void draw_promotion_overlay(AppState* as) {
         else if (exists)
             draw_piece_fallback(r, who, order[i], rc);
 
-        draw_outline(r, rc, exists ? 200 : 80, exists ? 200 : 80, 30, 255, 3.0f);
+        draw_outline(r, rc,
+                     exists ? Colors::PromotionOptionBorder : Colors::PromotionOptionDisabledBorder,
+                     3.0f);
     }
 }
 
 static void draw_start_screen(AppState* as) {
-    // Simple instruction blocks (no text rendering; use color hints)
     SDL_Renderer* r = as->renderer;
 
-    float pieceSize = 500;
+    // Create divided screen - white and black halves
+    float halfWidth  = WINDOW_W / 2.0f;
+    float fullHeight = WINDOW_H;
 
-    // Two large buttons-ish areas:
-    SDL_FRect left{WINDOW_W / 2 - pieceSize, WINDOW_H / 2 - pieceSize / 2, pieceSize, pieceSize};
-    SDL_FRect right{WINDOW_W / 2, WINDOW_H / 2 - pieceSize / 2, pieceSize, pieceSize};
+    // Left half - White side
+    SDL_FRect whiteHalf{0, 0, halfWidth, fullHeight};
+    draw_rect(r, whiteHalf, Colors::Bright);  // Light gray/white background
 
-    // Icons: white king on left, black king on right (if textures)
-    float pad = 40.0f;
+    // Right half - Black side
+    SDL_FRect blackHalf{halfWidth, 0, halfWidth, fullHeight};
+    draw_rect(r, blackHalf, Colors::Background);  // Dark gray/black background
+
+    // Center divider line
+    draw_rect(r, SDL_FRect{halfWidth - 2, 0, 4, fullHeight}, Colors::Border);
+
+    // Calculate piece areas with proper aspect ratio
+    float pieceAreaSize = std::min(halfWidth * 0.6f, fullHeight * 0.4f);
+    float pieceSize     = pieceAreaSize * 0.6f;  // Keep 1:1 ratio for textures
+
+    // White side piece area (left half)
+    SDL_FRect whitePieceArea{halfWidth / 2 - pieceAreaSize / 2, fullHeight / 2 - pieceAreaSize / 2,
+                             pieceAreaSize, pieceAreaSize};
+
+    // Black side piece area (right half)
+    SDL_FRect blackPieceArea{halfWidth + halfWidth / 2 - pieceAreaSize / 2,
+                             fullHeight / 2 - pieceAreaSize / 2, pieceAreaSize, pieceAreaSize};
+
+    // Draw background circles for pieces
+    draw_rect(r, whitePieceArea, Colors::OnBright);
+    draw_outline(r, whitePieceArea, Colors::Border, 3.0f);
+
+    draw_rect(r, blackPieceArea, Colors::OnBackground);
+    draw_outline(r, blackPieceArea, Colors::Border, 3.0f);
+
+    // Draw piece textures with proper scaling (1:1 ratio)
     if (as->texturesLoaded) {
-        draw_piece_texture(r, as->textures[T_W_K], left);
-        draw_piece_texture(r, as->textures[T_B_K], right);
+        // White king - center in white area
+        SDL_FRect whiteKingRect{whitePieceArea.x + (whitePieceArea.w - pieceSize) / 2,
+                                whitePieceArea.y + (whitePieceArea.h - pieceSize) / 2, pieceSize,
+                                pieceSize};
+        draw_piece_texture(r, as->textures[T_W_K], whiteKingRect);
+
+        // Black king - center in black area
+        SDL_FRect blackKingRect{blackPieceArea.x + (blackPieceArea.w - pieceSize) / 2,
+                                blackPieceArea.y + (blackPieceArea.h - pieceSize) / 2, pieceSize,
+                                pieceSize};
+        draw_piece_texture(r, as->textures[T_B_K], blackKingRect);
     }
 }
 
@@ -593,6 +694,7 @@ static void apply_move_and_advance(AppState* as, Move m) {
     as->selectedSq.reset();
     as->selectedDropPiece.reset();
     as->promo.visible = false;
+    as->legalMoves    = legal_moves(as->pos);  // Update legal moves after the move
 }
 
 static void start_ai_thinking_if_needed(AppState* as) {
@@ -612,14 +714,26 @@ static void start_ai_thinking_if_needed(AppState* as) {
     });
 }
 
+static void check_and_handle_terminal_state(AppState* as) {
+    bool  isMate = false, isThree = false;
+    Color win = WHITE;
+    if (is_terminal(as->pos, isMate, win, isThree)) {
+        as->phase             = Phase::GameOver;
+        as->winner            = win;
+        as->gameOverCheckmate = isMate;
+    } else {
+        start_ai_thinking_if_needed(as);
+    }
+}
+
 static void maybe_finish_ai(AppState* as) {
-    if (!as->ai.thinking) return;
     using namespace std::chrono_literals;
     if (as->ai.fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         SearchResult res = as->ai.fut.get();
         as->ai.thinking  = false;
         if (res.bestMove != MOVE_NONE) {
             apply_move_and_advance(as, res.bestMove);  // modifies as->pos on the main thread
+            check_and_handle_terminal_state(as);
         }
     }
 }
@@ -637,38 +751,43 @@ static void restart_to_side_select(AppState* as) {
 // ---------- Event handling ----------
 static bool click_in_pocket(AppState* as, float mx, float my, Color& pocketColorOut,
                             PieceType& ptOut) {
-    // Mirror of draw_pockets; compute the same rectangles and hit-test them.
-    const SDL_FRect& U    = as->ui.leftUIRect;
-    float            pad  = 12.0f;
-    float            cell = std::min((U.w - 2 * pad) / 4.0f, (U.h - 3 * pad) / 4.0f);
-    float            tH   = cell * 2 + pad;
-    SDL_FRect        blackPanel{U.x + pad, U.y + pad, U.w - 2 * pad, tH};
-    SDL_FRect        whitePanel{U.x + pad, U.y + U.h - pad - tH, U.w - 2 * pad, tH};
+    const SDL_FRect& U = as->ui.leftUIRect;
 
-    auto testPanel = [&](Color c, const SDL_FRect& panel) -> bool {
-        std::array<PieceType, 4> order{PAWN, HORSE, FERZ, WAZIR};
-        float                    gap = cell * 0.2f;
-        for (int i = 0; i < 4; ++i) {
-            int cnt = as->pos.pocket(c).count(order[i]);
-            for (int k = 0; k < std::min(cnt, 2); ++k) {
-                SDL_FRect rc{panel.x + i * (cell + gap), panel.y + (k == 0 ? gap : gap * 2 + cell),
-                             cell, cell};
-                if (point_in_rect(mx, my, rc)) {
-                    // Only allow selecting from mover's pocket
-                    if (c == as->pos.side_to_move() && cnt > 0) {
-                        pocketColorOut = c;
-                        ptOut          = order[i];
-                        return true;
-                    }
-                    return false;
-                }
+    // Same color mapping as draw_pockets
+    const bool  flipped     = as->boardFlipped;
+    const Color bottomColor = flipped ? ~as->humanSide : as->humanSide;
+    const Color topColor    = ~bottomColor;
+
+    const int   slotsPerSide = 4;  // PAWN..WAZIR
+    const float halfH        = U.h * 0.5f;
+
+    // Same areas as draw_pockets (no padding, no borders)
+    SDL_FRect topArea{U.x, U.y, U.w, halfH};
+    SDL_FRect bottomArea{U.x, U.y + halfH, U.w, halfH};
+
+    auto hit_stack = [&](Color side, const SDL_FRect& area) -> bool {
+        const float slotH = area.h / slotsPerSide;
+
+        for (PieceType pt = PAWN; pt <= WAZIR; ++pt) {
+            int count = as->pos.pocket(side).count(pt);
+            if (count <= 0) continue;  // only clickable if present
+
+            int row = static_cast<int>(pt) - static_cast<int>(PAWN);
+
+            SDL_FRect slotRect{area.x, area.y + row * slotH, area.w, slotH};
+
+            if (point_in_rect(mx, my, slotRect)) {
+                pocketColorOut = side;
+                ptOut          = pt;
+                return true;
             }
         }
         return false;
     };
 
-    if (testPanel(BLACK, blackPanel)) return true;
-    if (testPanel(WHITE, whitePanel)) return true;
+    if (point_in_rect(mx, my, topArea) && hit_stack(topColor, topArea)) return true;
+    if (point_in_rect(mx, my, bottomArea) && hit_stack(bottomColor, bottomArea)) return true;
+
     return false;
 }
 
@@ -685,16 +804,7 @@ static void handle_board_click(AppState* as, float mx, float my) {
                 for (auto m : as->promo.options) {
                     if (m.promotion_type() == want) {
                         apply_move_and_advance(as, m);
-                        // Check terminal or start AI
-                        bool  isMate = false, isThree = false;
-                        Color win = WHITE;
-                        if (is_terminal(as->pos, isMate, win, isThree)) {
-                            as->phase             = Phase::GameOver;
-                            as->winner            = isMate ? win : win;  // same var
-                            as->gameOverCheckmate = isMate;
-                        } else {
-                            start_ai_thinking_if_needed(as);
-                        }
+                        check_and_handle_terminal_state(as);
                         return;
                     }
                 }
@@ -729,15 +839,7 @@ static void handle_board_click(AppState* as, float mx, float my) {
         auto m = find_drop_to(as->pos, *as->selectedDropPiece, s);
         if (m) {
             apply_move_and_advance(as, *m);
-            bool  isMate = false, isThree = false;
-            Color win = WHITE;
-            if (is_terminal(as->pos, isMate, win, isThree)) {
-                as->phase             = Phase::GameOver;
-                as->winner            = isMate ? win : win;
-                as->gameOverCheckmate = isMate;
-            } else {
-                start_ai_thinking_if_needed(as);
-            }
+            check_and_handle_terminal_state(as);
             return;
         } else {
             // clicking elsewhere: clear drop selection or treat as select piece on board
@@ -771,6 +873,7 @@ static void handle_board_click(AppState* as, float mx, float my) {
 
     if (candidates.size() == 1) {
         apply_move_and_advance(as, candidates[0]);
+        check_and_handle_terminal_state(as);
     } else {
         // Multiple moves means promotion choices. Show chooser.
         as->promo.from    = *as->selectedSq;
@@ -778,17 +881,6 @@ static void handle_board_click(AppState* as, float mx, float my) {
         as->promo.options = candidates;  // all promotion variants
         as->promo.visible = true;
         return;
-    }
-
-    // After applying a move, check terminal or start AI.
-    bool  isMate = false, isThree = false;
-    Color win = WHITE;
-    if (is_terminal(as->pos, isMate, win, isThree)) {
-        as->phase             = Phase::GameOver;
-        as->winner            = isMate ? win : win;  // stalemate winner is side to move per rules
-        as->gameOverCheckmate = isMate;
-    } else {
-        start_ai_thinking_if_needed(as);
     }
 }
 
@@ -817,6 +909,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         printf("Couldn't create window and renderer: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+
     SDL_SetRenderLogicalPresentation(as->renderer, WINDOW_W, WINDOW_H,
                                      SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
@@ -863,6 +956,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
                 as->states.clear();
                 as->states.emplace_back();
                 as->pos.set(START_FEN, &as->states.back());
+                as->legalMoves   = legal_moves(as->pos);  // Update legal moves for new game
                 as->boardFlipped = false;
                 as->selectedSq.reset();
                 as->selectedDropPiece.reset();
@@ -892,27 +986,19 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     AppState* as = (AppState*)appstate;
 
-    // Render
-    SDL_SetRenderDrawColor(as->renderer, 25, 25, 25, 255);
-    SDL_RenderClear(as->renderer);
-
     // AI progression
-    if (as->phase == Phase::Playing) {
-        // Terminal check (constant time, tiny board)
-        bool  isMate = false, isThree = false;
-        Color win = WHITE;
-        if (is_terminal(as->pos, isMate, win, isThree)) {
-            as->phase             = Phase::GameOver;
-            as->winner            = win;
-            as->gameOverCheckmate = isMate;
-        } else {
-            maybe_finish_ai(as);
-        }
+    if (as->ai.thinking) {
+        maybe_finish_ai(as);
     }
 
     if (as->phase == Phase::SideSelect) {
         draw_start_screen(as);
     } else {
+        // Render
+        Colors::Background.set_sdl_color(as->renderer);
+        SDL_RenderClear(as->renderer);
+
+        // Playing or picking the promotion type
         draw_board(as);
         draw_last_move(as);
         draw_check(as);
@@ -923,21 +1009,14 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         // Promotion overlay (if active)
         draw_promotion_overlay(as);
 
-        // Optionally, “AI thinking” curtain
+        // Optionally, "AI thinking" curtain
         if (as->ai.thinking) {
             draw_rect(as->renderer,
                       SDL_FRect{as->ui.leftUIRect.x, as->ui.leftUIRect.y, as->ui.leftUIRect.w, 36},
-                      40, 40, 70, 200);
+                      Colors::AIThinking);
         }
 
         if (as->phase == Phase::GameOver) {
-            // Dim screen
-            draw_rect(as->renderer, SDL_FRect{0, 0, (float)WINDOW_W, (float)WINDOW_H}, 0, 0, 0,
-                      140);
-            // Simple highlight in center (no text; click to restart)
-            SDL_FRect box{(float)WINDOW_W / 2 - 200, (float)WINDOW_H / 2 - 100, 400, 200};
-            draw_rect(as->renderer, box, 50, 50, 80, 255);
-            draw_outline(as->renderer, box, 200, 200, 220, 255, 6.0f);
         }
     }
 

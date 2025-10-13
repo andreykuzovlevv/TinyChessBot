@@ -1,5 +1,5 @@
-# Makefile - minimal, works with g++ (MinGW/MSYS, Linux)
-PROJECT = test
+# Makefile - Windows-compatible version
+PROJECT = tinychess
 OUTDIR  = build
 TARGET  = $(OUTDIR)/$(PROJECT).exe
 
@@ -20,15 +20,28 @@ all: $(OUTDIR) $(TARGET)
 
 # create output dir if missing
 $(OUTDIR):
-	@mkdir -p $(OUTDIR)
+	@if not exist $(OUTDIR) mkdir $(OUTDIR)
 
 # link
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(INCDIRS) -o $@ $^ $(LIBDIRS) $(LIBS)
 
-# compile .cpp -> .o
-%.o: %.cpp
+# Specific compilation rules for each source type
+src/main.o: src/main.cpp
+	$(CXX) $(CXXFLAGS) $(INCDIRS) -c $< -o $@
+
+imgui/%.o: imgui/%.cpp
+	$(CXX) $(CXXFLAGS) $(INCDIRS) -c $< -o $@
+
+../src/core/%.o: ../src/core/%.cc
+	$(CXX) $(CXXFLAGS) $(INCDIRS) -c $< -o $@
+
+../src/minmax/%.o: ../src/minmax/%.cc
 	$(CXX) $(CXXFLAGS) $(INCDIRS) -c $< -o $@
 
 clean:
-	-rm -f src/*.o imgui/*.o ../src/core/*.o ../src/minmax/*.o $(TARGET)
+	@if exist src\*.o del /q src\*.o
+	@if exist imgui\*.o del /q imgui\*.o
+	@if exist ..\src\core\*.o del /q ..\src\core\*.o
+	@if exist ..\src\minmax\*.o del /q ..\src\minmax\*.o
+	@if exist build\test.exe del /q build\test.exe
