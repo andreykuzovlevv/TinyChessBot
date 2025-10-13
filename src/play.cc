@@ -21,7 +21,8 @@ int main() {
     std::deque<StateInfo> states;   // Container to manage StateInfo objects
     std::vector<Move>     history;  // Played moves history for undo
 
-    std::string fen = "fhwk/3p/P3/KWHF w 1";
+    // std::string fen = "fhwk/3p/P3/KWHF w 1";
+    std::string fen = "f1wk/f2p/PWh1/K1H1 w 1";
     states.emplace_back();  // Create first StateInfo
     pos.set(fen, &states.back());
     printf("hello 0");

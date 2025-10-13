@@ -22,6 +22,7 @@
 #include "core/movegen.h"
 #include "core/position.h"
 #include "core/types.h"
+#include "helpers.h"
 #include "minmax/minmax.h"
 
 using namespace tiny;
@@ -33,6 +34,8 @@ using namespace Colors;
 
 static const std::string START_FEN = "fhwk/3p/P3/KWHF w 1";
 
+static const int charsize = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+
 // Board and UI layout constants (logical)
 struct UIConf {
     // Layout constants (static, not computed dynamically)
@@ -41,9 +44,10 @@ struct UIConf {
     int squarePx    = boardSizePx / 4;
 
     int pocketWidth = boardSizePx / 8;
+    int rightPanel  = boardSizePx / 2;
 
     // Compute total content width = pocket + margin + board
-    int totalContentWidth = pocketWidth + marginPx + boardSizePx;
+    int totalContentWidth = pocketWidth + marginPx + boardSizePx + marginPx + rightPanel;
 
     // Center that content horizontally in window
     float startX = (WINDOW_W - totalContentWidth) / 2.0f;
@@ -65,98 +69,19 @@ struct UIConf {
         (float)boardSizePx                // h
     };
 
-    // Optional top bar placeholder
-    SDL_FRect topBarRect = {startX,
-                            startY - (float)(marginPx * 2),  // some offset above
-                            (float)totalContentWidth, (float)marginPx * 1.5f};
+    // Pocket on the left
+    SDL_FRect rightUIRect = {
+        boardRect.x + boardRect.w + marginPx,  // x
+        startY,                                // y
+        (float)rightPanel,                     // w
+        (float)boardSizePx                     // h (same as board)
+    };
 };
-
-// ---------- Helpers to map types ----------
-static inline bool is_own_piece(const Position& pos, Square s) {
-    Piece pc = pos.piece_on(s);
-    if (pc == NO_PIECE) return false;
-    Color c = color_of(pc);
-    return c == pos.side_to_move();
-}
-
-// Texture key: piece id (white/black x types).
-enum TexKey : int {
-    T_W_P = 0,
-    T_W_U,
-    T_W_F,
-    T_W_W,
-    T_W_K,
-    T_B_P,
-    T_B_U,
-    T_B_F,
-    T_B_W,
-    T_B_K,
-    TEX_NB
-};
-
-static inline TexKey texkey_for_piece(Piece p) {
-    switch (p) {
-        case W_PAWN:
-            return T_W_P;
-        case W_HORSE:
-            return T_W_U;
-        case W_FERZ:
-            return T_W_F;
-        case W_WAZIR:
-            return T_W_W;
-        case W_KING:
-            return T_W_K;
-        case B_PAWN:
-            return T_B_P;
-        case B_HORSE:
-            return T_B_U;
-        case B_FERZ:
-            return T_B_F;
-        case B_WAZIR:
-            return T_B_W;
-        case B_KING:
-            return T_B_K;
-        default:
-            return T_W_P;
-    }
-}
-
-static inline TexKey texkey_for_piece(Color c, PieceType pt) {
-    if (c == WHITE) {
-        switch (pt) {
-            case PAWN:
-                return T_W_P;
-            case HORSE:
-                return T_W_U;
-            case FERZ:
-                return T_W_F;
-            case WAZIR:
-                return T_W_W;
-            case KING:
-                return T_W_K;
-            default:
-                return T_W_P;
-        }
-    } else {
-        switch (pt) {
-            case PAWN:
-                return T_B_P;
-            case HORSE:
-                return T_B_U;
-            case FERZ:
-                return T_B_F;
-            case WAZIR:
-                return T_B_W;
-            case KING:
-                return T_B_K;
-            default:
-                return T_B_P;
-        }
-    }
-}
 
 // ---------- App/Game state ----------
 enum class Phase { SideSelect, Playing, PromotionPick, GameOver };
+
+enum class GameResult { None, CheckMate, Stalemate, Draw };
 
 struct PromotionUI {
     // Visible when a user clicked a (from,to) that has multiple promotions.
@@ -175,6 +100,8 @@ struct LastMoveVis {
 struct AsyncAI {
     bool                      thinking = false;
     std::future<SearchResult> fut;
+
+    std::optional<Value> lastEval;  // numeric score from search_best_move
 };
 
 typedef struct {
@@ -189,10 +116,10 @@ typedef struct {
     Color                 humanSide = WHITE;
 
     // Game flow
-    Phase phase             = Phase::SideSelect;
-    bool  boardFlipped      = false;  // in addition to side orientation; toggled by 'F'
-    bool  gameOverCheckmate = false;  // else stalemate or 3fold
-    Color winner            = WHITE;  // when game over (checkmate) or stalemate winner
+    Phase      phase        = Phase::SideSelect;
+    bool       boardFlipped = false;  // in addition to side orientation; toggled by 'F'
+    GameResult gameResult   = GameResult::None;
+    Color      winner       = WHITE;  // when game over (checkmate) or stalemate winner
 
     // Selection
     std::optional<Square>    selectedSq{};
@@ -564,16 +491,15 @@ static void draw_pockets(AppState* as) {
             }
 
             if (count > 1) {
-                float countX = slotRect.x + slotRect.w - 12.0f;
-                float countY = slotRect.y + 8.0f;
-                draw_filled_circle(r, SDL_FPoint{countX, countY}, 8.0f, Colors::CountText);
+                float countX = slotRect.x + slotRect.w - 15.0f;
+                float countY = slotRect.y + slotRect.h - 15.0f;
 
                 char countStr[4];
                 snprintf(countStr, sizeof(countStr), "%d", count);
-                draw_text(r, countStr, countX, countY, Colors::PocketBackground);
+                draw_text(r, countStr, countX, countY, Colors::Bright);
             }
             // Show selected square
-            if (as->selectedDropPiece == pt) {
+            if (as->selectedDropPiece == pt && side == as->humanSide) {
                 draw_outline(r, slotRect, Colors::SelectionOutline, 2.5f);
             }
         }
@@ -685,6 +611,74 @@ static void draw_start_screen(AppState* as) {
     }
 }
 
+static void draw_right_panel(AppState* as) {
+    SDL_Renderer*    r = as->renderer;
+    const SDL_FRect& U = as->ui.rightUIRect;
+
+    // Status section
+    SDL_FRect statusRect = {U.x, U.y + as->ui.marginPx, U.w, 150};
+
+    Colors::Bright.set_sdl_color(r);
+
+    // Header line
+    SDL_SetRenderScale(r, 3.0f, 3.0f);
+    SDL_RenderDebugText(r, (statusRect.x + 10) / 3, (statusRect.y + 8) / 3, "Status");
+    SDL_SetRenderScale(r, 1.0f, 1.0f);
+
+    float tx = statusRect.x + 10;
+    float ty = statusRect.y + 64;
+
+    if (as->phase == Phase::GameOver) {
+        // Result
+        if (as->gameResult == GameResult::Draw) {
+            SDL_SetRenderScale(r, 1.5f, 1.5f);
+            SDL_RenderDebugText(r, tx / 1.5f, ty / 1.5f, "Draw by threefold repetition");
+            SDL_SetRenderScale(r, 1.0f, 1.0f);
+            ty += 22;
+        } else {
+            const char* res = (as->gameResult == GameResult::CheckMate) ? "Checkmate" : "Stalemate";
+            const char* win = (as->winner == WHITE) ? "White" : "Black";
+            SDL_SetRenderScale(r, 1.5f, 1.5f);
+            SDL_RenderDebugTextFormat(r, tx / 1.5f, ty / 1.5f, "%s. Winner: %s", res, win);
+            SDL_SetRenderScale(r, 1.0f, 1.0f);
+            ty += 22;
+        }
+
+    } else {
+        // Side to move
+        const char* stm = (as->pos.side_to_move() == WHITE) ? "White to move" : "Black to move";
+        SDL_SetRenderScale(r, 1.5f, 1.5f);
+        SDL_RenderDebugText(r, tx / 1.5f, ty / 1.5f, stm);
+        SDL_SetRenderScale(r, 1.0f, 1.0f);
+        ty += 22;
+
+        // AI status / evaluation
+        if (as->ai.thinking) {
+            SDL_SetRenderScale(r, 1.5f, 1.5f);
+            SDL_RenderDebugText(r, tx / 1.5f, ty / 1.5, "AI thinking…");
+            SDL_SetRenderScale(r, 1.0f, 1.0f);
+            ty += 22;
+        } else {
+            if (as->ai.lastEval) {
+                // Note: score is from the AI's search perspective at the time it moved.
+                SDL_SetRenderScale(r, 1.5f, 1.5f);
+                SDL_RenderDebugTextFormat(r, tx / 1.5f, ty / 1.5f, "Eval (AI): %d",
+                                          (int)*as->ai.lastEval);
+                SDL_SetRenderScale(r, 1.0f, 1.0f);
+                ty += 22;
+            } else {
+                SDL_SetRenderScale(r, 1.5f, 1.5f);
+                SDL_RenderDebugText(r, tx / 1.5F, ty / 1.5F, "Eval: —");
+                SDL_SetRenderScale(r, 1.0f, 1.0f);
+                ty += 22;
+            }
+        }
+        // Small hints
+        ty += 6;
+        SDL_RenderDebugText(r, tx, ty, "[R] Restart");
+    }
+}
+
 // ---------- Game mechanics ----------
 static void apply_move_and_advance(AppState* as, Move m) {
     as->states.emplace_back();
@@ -718,9 +712,11 @@ static void check_and_handle_terminal_state(AppState* as) {
     bool  isMate = false, isThree = false;
     Color win = WHITE;
     if (is_terminal(as->pos, isMate, win, isThree)) {
-        as->phase             = Phase::GameOver;
-        as->winner            = win;
-        as->gameOverCheckmate = isMate;
+        as->phase      = Phase::GameOver;
+        as->winner     = win;
+        as->gameResult = isThree  ? GameResult::Draw
+                         : isMate ? GameResult::CheckMate
+                                  : GameResult::Stalemate;
     } else {
         start_ai_thinking_if_needed(as);
     }
@@ -731,6 +727,9 @@ static void maybe_finish_ai(AppState* as) {
     if (as->ai.fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         SearchResult res = as->ai.fut.get();
         as->ai.thinking  = false;
+
+        as->ai.lastEval = res.score;
+
         if (res.bestMove != MOVE_NONE) {
             apply_move_and_advance(as, res.bestMove);  // modifies as->pos on the main thread
             check_and_handle_terminal_state(as);
@@ -740,7 +739,9 @@ static void maybe_finish_ai(AppState* as) {
 
 static void restart_to_side_select(AppState* as) {
     as->phase       = Phase::SideSelect;
+    as->gameResult  = GameResult::None;
     as->ai.thinking = false;
+    as->ai.lastEval.reset();
     as->selectedSq.reset();
     as->selectedDropPiece.reset();
     as->promo.visible = false;
@@ -941,6 +942,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
         case SDL_EVENT_QUIT:
             return SDL_APP_SUCCESS;
 
+        case SDL_EVENT_KEY_DOWN: {
+            if (event->key.scancode == SDL_SCANCODE_R) {
+                restart_to_side_select(as);
+            };
+            break;
+        }
+
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             float mx = (float)event->button.x;
             float my = (float)event->button.y;
@@ -969,13 +977,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
                 if (as->pos.side_to_move() != as->humanSide) {
                     start_ai_thinking_if_needed(as);
                 }
-            } else if (as->phase == Phase::Playing || as->phase == Phase::PromotionPick) {
+            } else {
                 handle_board_click(as, mx, my);
-            } else if (as->phase == Phase::GameOver) {
-                // click anywhere -> restart to side select
-                restart_to_side_select(as);
+                break;
             }
-            break;
         }
         default:
             break;
@@ -994,7 +999,6 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     if (as->phase == Phase::SideSelect) {
         draw_start_screen(as);
     } else {
-        // Render
         Colors::Background.set_sdl_color(as->renderer);
         SDL_RenderClear(as->renderer);
 
@@ -1004,23 +1008,15 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         draw_check(as);
         draw_selection(as);
         draw_pieces(as);
-        draw_pockets(as);
 
-        // Promotion overlay (if active)
         draw_promotion_overlay(as);
 
-        // Optionally, "AI thinking" curtain
-        if (as->ai.thinking) {
-            draw_rect(as->renderer,
-                      SDL_FRect{as->ui.leftUIRect.x, as->ui.leftUIRect.y, as->ui.leftUIRect.w, 36},
-                      Colors::AIThinking);
-        }
-
-        if (as->phase == Phase::GameOver) {
-        }
+        draw_pockets(as);
+        draw_right_panel(as);
     }
 
     SDL_RenderPresent(as->renderer);
+
     return SDL_APP_CONTINUE;
 }
 

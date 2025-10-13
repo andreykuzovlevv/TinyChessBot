@@ -378,11 +378,15 @@ bool Position::legal(Move m) const {
 
     // If the moving piece is a king, check whether the destination square is
     // attacked by the opponent.
-    if (type_of(piece_on(from)) == KING) return !(attackers_to_exist(to, pieces() ^ from, ~us));
 
+    if (type_of(piece_on(from)) == KING) return !(attackers_to_exist(to, pieces() ^ from, ~us));
     // A non-king move is legal if and only if it is not pinned or it
-    // is moving along the ray towards or away from the king.
-    return !(blockers_for_king(us) & from);
+    // is moving to capture attacking HORSE <- not defined yet.
+    if (!(blockers_for_king(us) & from)) {
+        return true;
+    } else {
+        return square_bb(to) & pinners(us) && !more_than_one(pinners(us));
+    }
 }
 
 // Calculates st->blockersForKing[c],
@@ -406,7 +410,10 @@ void Position::update_slider_blockers(Color c) const {
 
         // If that leg square is occupied by piece, it's a blocker
         Bitboard b = leg & occupancy;
-        if (b) st->blockersForKing[c] |= b;
+        if (b) {
+            st->blockersForKing[c] |= b;
+            st->pinners[c] |= sniperSq;
+        }
     }
 }
 

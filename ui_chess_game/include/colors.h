@@ -63,16 +63,10 @@ constexpr DrawColor PromotionOptionBorder         = DrawColor(200, 200, 30);
 constexpr DrawColor PromotionOptionDisabled       = DrawColor(40, 40, 40);
 constexpr DrawColor PromotionOptionDisabledBorder = DrawColor(80, 80, 30);
 
-// Game over colors
-constexpr DrawColor GameOverOverlay = DrawColor(0, 0, 0, 140);
-constexpr DrawColor GameOverBox     = DrawColor(50, 50, 80);
-constexpr DrawColor GameOverBorder  = DrawColor(200, 200, 220);
-
 // AI thinking indicator
 constexpr DrawColor AIThinking = DrawColor(40, 40, 70, 200);
 
 // Pocket colors
 constexpr DrawColor PocketBackground = DrawColor(50, 50, 50);
 constexpr DrawColor PocketBorder     = DrawColor(100, 100, 100);
-constexpr DrawColor CountText        = DrawColor(255, 255, 255);
 }  // namespace Colors
