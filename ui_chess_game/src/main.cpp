@@ -129,7 +129,7 @@ typedef struct {
 
     // AI
     AsyncAI ai;
-    int     searchDepth = 3;
+    int     searchDepth = 10;
 
     // Rendering
     UIConf                           ui{};
