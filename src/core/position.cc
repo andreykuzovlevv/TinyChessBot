@@ -365,6 +365,18 @@ bool Position::attackers_to_exist(Square s, Bitboard occupied, Color c) const {
     return false;
 }
 
+inline Bitboard Position::pinners_on_leg(Color us, Square legSq) const {
+    Bitboard res = 0;
+    Bitboard ps  = pinners(us);
+    Square   ksq = square<KING>(us);
+
+    while (ps) {
+        Square h = pop_lsb(ps);
+        if (horse_leg_bb(h, ksq) & square_bb(legSq)) res |= square_bb(h);
+    }
+    return res;
+}
+
 // Tests whether a pseudo-legal move is legal
 bool Position::legal(Move m) const {
     assert(m.is_ok());
@@ -376,17 +388,25 @@ bool Position::legal(Move m) const {
     assert(color_of(moved_piece(m)) == us);
     assert(piece_on(square<KING>(us)) == make_piece(us, KING));
 
-    // If the moving piece is a king, check whether the destination square is
-    // attacked by the opponent.
+    // King moves: destination must not be attacked
+    if (type_of(piece_on(from)) == KING) return !attackers_to_exist(to, pieces() ^ from, ~us);
 
-    if (type_of(piece_on(from)) == KING) return !(attackers_to_exist(to, pieces() ^ from, ~us));
-    // A non-king move is legal if and only if it is not pinned or it
-    // is moving to capture attacking HORSE <- not defined yet.
-    if (!(blockers_for_king(us) & from)) {
-        return true;
-    } else {
-        return square_bb(to) & pinners(us) && !more_than_one(pinners(us));
-    }
+    // If our moving piece is *not* a blocker of a HORSE attack on our king, any pseudo-legal move
+    // is fine
+    if (!(blockers_for_king(us) & square_bb(from))) return true;
+
+    // Our piece sits on a HORSE leg => it is pinned. Only legal option: capture the corresponding
+    // pinner, and only if no second HORSE uses the same leg.
+    Piece toPc = piece_on(to);
+    if (type_of(toPc) != HORSE || color_of(toPc) == us) return false;
+
+    // Filter to pinners that use *this* leg
+    Bitboard legPinners = pinners_on_leg(us, from);
+
+    // Must capture a pinner on this leg, and that set must be singleton
+    if (!(legPinners & square_bb(to))) return false;
+
+    return !more_than_one(legPinners);
 }
 
 // Calculates st->blockersForKing[c],
@@ -395,24 +415,29 @@ void Position::update_slider_blockers(Color c) const {
     Square ksq = square<KING>(c);
 
     st->blockersForKing[c] = 0;
+    st->pinners[c]         = 0;  // <-- important: reset
 
-    // Enemy horses that geometrically attack ksq (reverse pseudo)
+    // Enemy HORSEs that geometrically attack ksq
     Bitboard snipers = (attacks_bb<HORSE>(ksq) & pieces(HORSE)) & pieces(~c);
 
-    // Ignore snipers themselves in occupancy
+    // Ignore those snipers in occupancy so their own squares don't count as blockers
     Bitboard occupancy = pieces() ^ snipers;
 
     while (snipers) {
-        Square sniperSq = pop_lsb(snipers);
+        Square h = pop_lsb(snipers);
 
-        // Leg square required for this horse to attack the king
-        Bitboard leg = horse_leg_bb(sniperSq, ksq);
+        // Required leg square for this HORSE to attack our king
+        Bitboard leg = horse_leg_bb(h, ksq);  // should be a single-bit bitboard
 
-        // If that leg square is occupied by piece, it's a blocker
+        // If that leg square is occupied by a piece, it blocks this HORSE
         Bitboard b = leg & occupancy;
-        if (b) {
-            st->blockersForKing[c] |= b;
-            st->pinners[c] |= sniperSq;
+
+        // We only care about *our* piece blocking (true pin); enemy-occupied leg is irrelevant for
+        // our pins
+        Bitboard ourBlocker = b & pieces(c);
+        if (ourBlocker) {
+            st->blockersForKing[c] |= ourBlocker;  // the leg square (our piece) is a blocker
+            st->pinners[c] |= square_bb(h);        // the HORSE is a pinner of our piece
         }
     }
 }
@@ -667,7 +692,7 @@ bool Position::is_threefold_game() const {
 // and raise an assert if something wrong is detected.
 // This is meant to be helpful when debugging.
 bool Position::pos_is_ok() const {
-    constexpr bool Fast = false;  // Quick (default) or full check?
+    constexpr bool Fast = true;  // Quick (default) or full check?
 
     if ((sideToMove != WHITE && sideToMove != BLACK) || piece_on(square<KING>(WHITE)) != W_KING ||
         piece_on(square<KING>(BLACK)) != B_KING)
